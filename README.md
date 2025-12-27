@@ -32,15 +32,24 @@ streamlit run Welcome.py
 Example: Finding Employees by Skills
 
 ```python
-from components.engine import Engine
-from components.skill import Skill
+from components.keywords import Keywords
+from components.jaeger import Jaeger
+from components.cvs import CVS
+
+# Initialize the CVS collector
+cvs = CVS()
+cvs.load_pkl() # Load the database
 
 # Initialize the engine
-engine = Engine()
+jaeger = Jeager(cvs=cvs)
+
 # Define required skills
 required_skills = ["Python", "Machine Learning", "Data Analysis"]
+keywords = Keywords(list(key_names), list(weights))
+
 # Get ranked employees
-results = engine.match_skills(required_skills)
+results = jaeger.export_results(keywords=keywords, show=True, runtype='semantic')
+
 # Display results as table
 print(results.to_dataframe())
 ```
@@ -241,6 +250,7 @@ $$
 This metric evaluates the angle between two vectors in the semantic space: values closer to 1 indicate strong similarity, while values near 0 indicate weak or no relation.
 
 For each CV, the system aggregates the individual similarity scores of all matched chunks by computing their average. This produces a single, normalized relevance score representing how well the CV matches the queried skill set. In other words:
+
 $$
 \text{CV Score} = \frac{1}{n} \sum_{i=1}^{n} \text{similarity}(skill, chunk_i)
 $$
