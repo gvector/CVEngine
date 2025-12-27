@@ -1,4 +1,4 @@
-# CVEngine (Skill-Matcher)
+# CVEngine (aka Skill-Matcher) - Still Under Review
 An intelligent CV processing and employee matching system that analyzes resumes, extracts skills, and ranks employees based on semantic similarity to required competencies.
 
 ## Overview
@@ -56,12 +56,11 @@ print(results.to_dataframe())
 
 ## Project Structure
 ```
-CVEngine
+CVEngine/
 ├─ README.md
 ├─ Welcome.py               # Main Streamlit Interface
 ├─ api_cv.py                # API Endopoints
-├─ client.py
-├─ components
+├─ components/
 │  ├─ config.py
 │  ├─ constants.py          
 │  ├─ cv.py                 # CV Object model
@@ -77,7 +76,7 @@ CVEngine
 │  └─ summarizer.py         # Summarization system
 ├─ create_archive.py
 ├─ main.py
-├─ pages
+├─ pages/
 │  ├─ 1_Semantic.py         # Streamlit Semantic Search 
 │  ├─ 2_Logic.py            # Streamlit Logic Search 
 │  ├─ 3_Ontologic.py        # Streamlit Onotologic Search
@@ -88,18 +87,14 @@ CVEngine
 ```
 
 ### Requirements
-- Python 3.11+
-- See requirements.txt for full dependency list
+- **Python 3.11+**
+- See *requirements.txt* for full dependency list
 
 ## Matching Algorithms
 The system supports multiple matching approaches:
-
 - *Semantic*: Uses semantic similarity for skill matching
-
 - *Logic*: Rule-based matching logic
-
 - *Ontologic*: Ontology-driven skill relationships
-
 - *Matrix*: Similarity matrix computation
 
 ### Semantic Search DeepDive
@@ -304,7 +299,11 @@ Compute cosine similarity with ALL chunks
 ```
 
 ## Future Improvements
-Contributions are welcome! Please feel free to submit a Pull Request.
+The main developments planned and the next steps in the project include:
+- **Code refactoring**, with a focus on modularity and maintainability.
+- **Improvement of the overall functioning** of the system (CV processing, processing pipeline, TF-IDF content extraction).
+- **Introduction of agentic logic and orchestrations** to automate flows and make the system more scalable.
+- **Adoption of additional databases and updating of the data architecture** to optimize performance and scalability.
 
 ## License
 [To be determined]
