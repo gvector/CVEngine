@@ -226,3 +226,20 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
  
+#############################################################################################################################
+# CVENGINE                                                                                                                  #
+#############################################################################################################################
+
+# Generated code knowledge graph
+.codegraph/
+
+# Runtime data (summaries cache, logs)
+cvengine_data/
+
+# Legacy data and export directories
+source/
+results/
+resources/
+
+# Pickle archives (legacy data, never committed)
+*.pkl
