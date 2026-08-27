@@ -48,6 +48,30 @@ def status() -> None:
     _print_dict(info)
 
 
+@app.command()
+def peek(
+    collection: str = typer.Option(None, "--collection", "-c", help="Filter by collection name"),
+    limit: int = typer.Option(10, "--limit", help="Number of chunks to show"),
+) -> None:
+    """List Chroma collections and inspect their chunks (no models required)."""
+    import chromadb
+
+    settings = Settings()
+    client = chromadb.HttpClient(host=settings.chroma.host, port=settings.chroma.port)
+    collections = [col for col in client.list_collections() if collection is None or col.name == collection]
+    if not collections:
+        console.print("[yellow]No collections found. Ingest some CVs first.[/yellow]")
+        return
+    for col in collections:
+        console.print(f"[bold]{col.name}[/bold] ({col.count()} chunks)")
+        data = col.get(limit=limit, include=["documents", "metadatas"])
+        for chunk_id, doc, meta in zip(data["ids"], data["documents"], data["metadatas"], strict=True):
+            section = meta.get("section", "?") if meta else "?"
+            resource = meta.get("resource_id", "?") if meta else "?"
+            console.print(f"  [dim]{chunk_id}[/dim] {resource} [{section}] {doc[:100]}")
+        console.print()
+
+
 def _print_dict(data: dict, indent: int = 0) -> None:
     for key, value in data.items():
         if isinstance(value, dict):

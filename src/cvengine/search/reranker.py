@@ -8,6 +8,7 @@ import math
 from sentence_transformers import CrossEncoder
 
 from cvengine.db.schemas import ChunkHit
+from cvengine.embeddings.provider import quiet_model_logging
 from cvengine.observability import timeit
 
 logger = logging.getLogger("cvengine")
@@ -25,6 +26,7 @@ class CrossEncoderReranker:
     """Rerank retrieved chunks with a cross-encoder over query-chunk pairs."""
 
     def __init__(self, model_name: str = DEFAULT_RERANKER_MODEL) -> None:
+        quiet_model_logging()
         self._model = CrossEncoder(model_name)
         self.model_name = model_name
 
