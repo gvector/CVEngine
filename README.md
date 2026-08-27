@@ -1,309 +1,119 @@
-# CVEngine (aka Skill-Matcher) - Still Under Review
-An intelligent CV processing and employee matching system that analyzes resumes, extracts skills, and ranks employees based on semantic similarity to required competencies.
+# CVEngine
 
-## Overview
-CVEngine processes employee CVs, transforms them into structured objects, embedded with te vectorialization of the text, and performs intelligent matching when specific skills are requested. The system uses semantic analysis to rank the best-suited employees for given skill requirements.
+An intelligent CV processing and employee matching system. CVs are structured into
+sections by an LLM, embedded with a local sentence-transformer model, stored in a
+Chroma vector database and ranked through an agentic search pipeline built with
+LangGraph.
 
-## Features
-- CV parsing and structured data extraction
-- Semantic skill matching and employee ranking
-- Multiple matching algorithms (Semantic, Logic, Ontologic)
-- Interactive web interface powered by Streamlit
-- Excel export functionality
-- Real-time feedback and logging system
+## Highlights
+
+- **LLM-based CV structuring**: each CV is split into canonical sections
+  (summary, skills, experience, projects, certifications, education, languages, other)
+  with per-section keyword extraction used as search metadata.
+- **Vector search**: chunks are embedded with `nomic-ai/nomic-embed-text-v1.5`
+  (768 dims, in-process) and stored in a versioned Chroma collection.
+- **Agentic ranking**: LangGraph pipeline `enrich -> retrieve -> rerank -> score -> synthesize`
+  with query expansion, cross-encoder reranking (`bge-reranker-base`), section-weighted
+  hybrid scoring (semantic + keyword metadata) and optional LLM synthesis.
+- **Multiple ingestion sources**: single file (`docx`/`txt`/`pdf`), folder batch, raw text,
+  and legacy `.pkl` archive migration — all sharing the same pipeline.
+- **Interfaces**: FastAPI `/v1` REST API, Typer CLI/TUI (`rich` tables), structured JSON
+  logs with execution-time tracing.
+
+## Requirements
+
+- **Python 3.14+** (managed with [uv](https://docs.astral.sh/uv/))
+- **Docker** for the Chroma server
+- **Ollama** (default LLM provider, e.g. `llama3.1:8b`) or an OpenAI API key
 
 ## Installation
-Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/yourusername/CVEngine.git
+git clone https://github.com/gvector/CVEngine.git
 cd CVEngine
-pip install -r requirements.txt
+uv sync                     # install dependencies (dev group included)
+docker compose up -d        # start the Chroma server (port 8000)
+cp .env.example .env        # optional: tweak configuration
 ```
 
 ## Usage
-Quick Start
-Run the main application:
 
 ```bash
-streamlit run Welcome.py
+# Status: collections, models, counts
+uv run cvengine status
+
+# Inspect the vector store content (no models required)
+uv run cvengine peek
+
+# Ingest a CV file or a whole folder
+uv run cvengine ingest path/to/cv.docx
+uv run cvengine ingest path/to/folder
+
+# Agentic search (degrades to base skills when Ollama is unavailable)
+uv run cvengine search "Python" "Machine Learning" --business-line PV --top-k 20
+
+# Generate synthetic CVs into the TEST collection and evaluate ranking quality
+uv run cvengine synth --count 100
+uv run cvengine eval --count 100
+
+# Migrate a legacy pkl archive into Chroma
+uv run cvengine migrate-pkl path/to/archive.pkl
+
+# Run the FastAPI server (OpenAPI docs at http://localhost:8000/docs)
+uv run uvicorn cvengine.api.app:create_app --factory --reload
 ```
 
-Example: Finding Employees by Skills
+Programmatic example:
 
 ```python
-from components.keywords import Keywords
-from components.jaeger import Jaeger
-from components.cvs import CVS
+from cvengine.services import CVEngine
 
-# Initialize the CVS collector
-cvs = CVS()
-cvs.load_pkl() # Load the database
-
-# Initialize the engine
-jaeger = Jeager(cvs=cvs)
-
-# Define required skills
-required_skills = ["Python", "Machine Learning", "Data Analysis"]
-keywords = Keywords(list(key_names), list(weights))
-
-# Get ranked employees
-results = jaeger.export_results(keywords=keywords, show=True, runtype='semantic')
-
-# Display results as table
-print(results.to_dataframe())
+engine = CVEngine()
+state = engine.graph.invoke({"skills": ["Python", "Machine Learning"], "top_k": 10})
+for result in state["results"]:
+    print(result.resource_id, result.score)
 ```
 
 ## Project Structure
+
 ```
 CVEngine/
-├─ README.md
-├─ Welcome.py               # Main Streamlit Interface
-├─ api_cv.py                # API Endopoints
-├─ components/
-│  ├─ config.py
-│  ├─ constants.py          
-│  ├─ cv.py                 # CV Object model
-│  ├─ cvs.py                # CV collection management
-│  ├─ feedback.py           # Feedback system management
-│  ├─ jaeger.py             # Matching Engine Core 
-│  ├─ keywords.py           # Keywords Object model
-│  ├─ llm.py                # LLM model integration
-│  ├─ logger.py             # Custom logging system
-│  ├─ matrix.py             
-│  ├─ person.py             # Additional inforation model
-│  ├─ sql_connector.py
-│  └─ summarizer.py         # Summarization system
-├─ create_archive.py
-├─ main.py
-├─ pages/
-│  ├─ 1_Semantic.py         # Streamlit Semantic Search 
-│  ├─ 2_Logic.py            # Streamlit Logic Search 
-│  ├─ 3_Ontologic.py        # Streamlit Onotologic Search
-│  ├─ 4_Matrix.py           # Streamlit Matrix Search 
-│  └─ 5_Summary.py          # Streamlit Summarization 
-├─ requirements.txt
-└─ test_person.py
+├─ src/cvengine/
+│  ├─ config.py          # pydantic-settings configuration (env / .env)
+│  ├─ constants.py       # section taxonomy and scoring defaults
+│  ├─ observability.py   # structured JSON logging + timing
+│  ├─ services.py        # application container (CVEngine)
+│  ├─ db/                # Chroma repository + data models
+│  ├─ embeddings/        # nomic provider with task prefixes
+│  ├─ llm/               # OpenAI / Ollama providers (configurable)
+│  ├─ ingestion/         # extraction, LLM sectioning, pipeline, pkl migrator
+│  ├─ search/            # LangGraph agent, reranker, hybrid scoring
+│  ├─ api/               # FastAPI /v1 application
+│  ├─ cli/               # Typer CLI / TUI
+│  └─ synthetic/         # synthetic CV generator (tests / eval)
+├─ tests/                # unit, integration and parity tests
+├─ docker-compose.yml    # Chroma server
+├─ pyproject.toml        # uv project definition + ruff/pytest config
+└─ .env.example          # configuration template
 ```
 
-### Requirements
-- **Python 3.11+**
-- See *requirements.txt* for full dependency list
+## Testing
 
-## Matching Algorithms
-The system supports multiple matching approaches:
-- *Semantic*: Uses semantic similarity for skill matching
-- *Logic*: Rule-based matching logic
-- *Ontologic*: Ontology-driven skill relationships
-- *Matrix*: Similarity matrix computation
-
-### Semantic Search DeepDive
-The *Semantic Matching Algorithm* is the core of the CVEngine's Intelligence. It process the strucutre of the Data and performs the similarity in orther to extract the final ranking of the best-suited employee.
-
-#### Vector Embedding Architecture
-Instead of using traditional vector databases (Milvus, Chroma, Pinecone, etc..), CVEngine employs an embedded vectorization approach where each CV object contains its own vector representations. This design choice offers several advantages:
-- **Portability**: CV objects are self-contained with their embeddings
-- **Flexibility**: No dependency on external vector database infrastructure
-- **Transparency**: Direct control over similarity computation
-- **Efficiency**: Reduced latency by eliminating database queries
-- **Compliance**: All the Data and Metadata are not shared across cloud services
-
-Here an example of the CV object definition:
-
-```python
-class CVperson:
-    def __init__(self, ..., fragments: list[list[float]] = None):
-        ...
-        self.bert_model = BertModel.GTE_LARGE
-        embedding_model = SentenceTransformer(self.bert_model.value)
-        if fragments is None:
-            self.fragments = self.embed(embedding_model, self.split(text=body, model=self.bert_model.value))
-        else:
-            self.fragments = fragments
-
-    @staticmethod
-    def split(text: str, model: str) -> list[str]:
-        """
-        Split the text into fragments based on the maximum token length of the model (512 token for GTE Large model)
-        ...
-        """
-        tokenizer = AutoTokenizer.from_pretrained(model)
-        text_splitter = TokenTextSplitter.from_huggingface_tokenizer(
-            tokenizer, chunk_size=128, chunk_overlap=50
-        )
-        logger.debug(f"Text split into {len(text_splitter.split_text(text))} fragments")
-        return text_splitter.split_text(text)
-
-    @staticmethod
-    def embed(model, docs: list[str]) -> list[list[float]]:
-        """
-        Embed the list of fragments using the Sentence Transformer model
-        ...
-        """
-        embedded_docs = []
-        for doc in docs:
-            embedded_docs.append(model.encode(doc))
-        logger.debug("CV embedding completed")
-        return [arr.tolist() for arr in embedded_docs]
+```bash
+uv run pytest            # unit tests run without Chroma/models;
+                         # integration tests auto-skip if Chroma is down
+uv run ruff check src tests
 ```
 
-How It Works:
+## Configuration
 
-#### 1. CV Chunking and Vectorization
-When a employee information is processsed its extract all the meaningful information: the CV it's divided into meaningful chunks (skills, experiences, education); all the other information are embedded in the class attributes and in the Person object. 
-Each chunk of the CV is transformed into a high-dimensional vector using specific *embedding models*:
+All settings are driven by `CVENGINE_*` environment variables (see `.env.example`):
+LLM provider/model, embedding model, Chroma host/collections, scoring weights and
+section multipliers.
 
-```text
-Original CV Document
-┌─────────────────────────────────────────┐
-│ John Doe                                │
-│ Skills: Python, SATA, Autoclave         │
-│ Experience: 5 years as Data Scientist   │
-│ Education: MSc Computer Science         │
-│ Projects: Built recommendation system   │
-└─────────────────────────────────────────┘
-                    │
-                    ▼
-            Text Extraction
-                    │
-                    ▼
-              Chunking Process
-                    │
-        ┌───────────┼───────────┬──────────┐
-        ▼           ▼           ▼          ▼
-    ┌───────┐  ┌────────┐  ┌─────────┐  ┌─────────┐
-    │Chunk 1│  │Chunk 2 │  │Chunk 3  │  │Chunk 4  │
-    │Skills │  │Work    │  │Education│  │Projects │
-    └───────┘  └────────┘  └─────────┘  └─────────┘
-        │          │           │            │
-        ▼          ▼           ▼            ▼
-    [0.23,    [0.45,      [0.12,       [0.89,
-    0.67,     0.21,       0.78,        0.34,
-    0.91,     0.88,       0.45,        0.56,
-    ...]      ...]        ...]         ...]
-    
-    512-dim    512-dim     512-dim      512-dim
-    vector     vector      vector       vector
-```
+## Roadmap
 
-Of course it can happen that different CVs can have different lengths, for this reason the system is built to deal with different length of vectorization:
-
-```text
-CV Object Structure in Memory:
-
-Employee A (Junior)                Employee B (Senior)
-┌─────────────────────┐           ┌─────────────────────┐
-│ CV Object           │           │ CV Object           │
-│ ├─ Metadata         │           │ ├─ Metadata         │
-│ └─ Chunks: 3        │           │ └─ Chunks: 7        │
-│    ├─ [vec_1]       │           │    ├─ [vec_1]       │
-│    ├─ [vec_2]       │           │    ├─ [vec_2]       │
-│    └─ [vec_3]       │           │    ├─ [vec_3]       │
-└─────────────────────┘           │    ├─ [vec_4]       │
-                                  │    ├─ [vec_5]       │
-                                  │    ├─ [vec_6]       │
-                                  │    └─ [vec_7]       │
-                                  └─────────────────────┘
-
-Employee C (Mid-level)
-┌─────────────────────┐
-│ CV Object           │
-│ ├─ Metadata         │
-│ └─ Chunks: 5        │
-│    ├─ [vec_1]       │
-│    ├─ [vec_2]       │
-│    ├─ [vec_3]       │
-│    ├─ [vec_4]       │
-│    └─ [vec_5]       │
-└─────────────────────┘
-```
-
-#### 2. Skills Embedding
-Since cosine similarity operates on vector comparisons, the skills must first be converted into embedded vectors. This is done in a similar way as for the CV object.
-
-```python
-class Keywords:
-    """
-    A class to represent a collection of keywords and their weights for text matching.
-    ...                     
-    """
-    def __init__(self, words: list[str], weights: list[float]) -> None:
-        self.bert_model = BertModel.GTE_LARGE
-        embedding_model = SentenceTransformer(self.bert_model.value)
-        self.embedded_words = {word: {'embedding': embedding_model.encode(word).tolist(),
-                                      'weight': weight} for word, weight in zip(words, weights)}
-        self.weights = weights
-```
-
-#### 3. Cosine Similarity Computation
-When matching skills, the system computes the cosine similarity between the embedded vector of each query skill and every embedded chunk within a CV:
-
-$$
-\text{similarity}(A, B) = \frac{A \cdot B}{\|A\| \, \|B\|}
-$$
-
-This metric evaluates the angle between two vectors in the semantic space: values closer to 1 indicate strong similarity, while values near 0 indicate weak or no relation.
-
-For each CV, the system aggregates the individual similarity scores of all matched chunks by computing their average. This produces a single, normalized relevance score representing how well the CV matches the queried skill set. In other words:
-
-$$
-\text{CV Score} = \frac{1}{n} \sum_{i=1}^{n} \text{similarity}(skill, chunk_i)
-$$
-
-#### 4. Ranking and Aggregation
-
-For each employee, the system:
-- Calculates similarity scores for all relevant CV chunks
-```python
-class CVperson:
-    ...
-    def match_words(self, words: list[list[float]]) -> list[float]:
-        """
-        Compute the similarity of each words with all the fragments of the CV and return a list of similarity values
-        ...
-        """
-        similarities = cosine_similarity(words, self.fragments)
-        return similarities.max(axis=1)
-```
-- Aggregates scores to produce an overall match rating
-- Ranks employees by their final similarity scores
-
-```text
-User Query: "Machine Learning Engineer"
-         │
-         ▼
-    Vectorize Query
-    [0.34, 0.12, 0.89, ...]
-         │
-         ▼
-    ┌────┴─────┬──────────┬──────────┐
-    ▼          ▼          ▼          ▼
-Employee A  Employee B  Employee C  Employee D
-  (3 chunks)  (7 chunks)  (5 chunks)  (4 chunks)
-    │          │          │          │
-    ▼          ▼          ▼          ▼
-Compute cosine similarity with ALL chunks
-    │          │          │          │
-    ▼          ▼          ▼          ▼
-  Mean:       Mean:     Mean:       Mean:
-    0.73      0.91      0.85        0.68
-    │          │          │          │
-    └──────────┴──────────┴──────────┘
-                 │
-                 ▼
-         Ranked Results:
-         1. Employee B (0.91)
-         2. Employee C (0.85)
-         3. Employee A (0.73)
-         4. Employee D (0.68)
-```
-
-## Future Improvements
-The main developments planned and the next steps in the project include:
-- **Code refactoring**, with a focus on modularity and maintainability.
-- **Improvement of the overall functioning** of the system (CV processing, processing pipeline, TF-IDF content extraction).
-- **Introduction of agentic logic and orchestrations** to automate flows and make the system more scalable.
-- **Adoption of additional databases and updating of the data architecture** to optimize performance and scalability.
-
-## License
-[To be determined]
+- Grafana + Prometheus/Loki monitoring on top of the structured logs and metrics
+- Backend and frontend containerization
+- New frontend (replacing the removed Streamlit app)
+- Additional search modes (logic / matrix / ontology)

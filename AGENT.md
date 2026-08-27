@@ -7,10 +7,10 @@ them into sections via an LLM, embeds them with a local sentence-transformer mod
 stores the chunks in a Chroma vector database, and ranks resources through an agentic
 search pipeline built with LangGraph.
 
-The old `components/`, `main.py`, `api_cv.py`, `pages/` and `Welcome.py` files are the
-**legacy codebase** and must NOT be touched. All new development lives in the green-field
-`src/cvengine/` package. The frontend (Streamlit) is out of scope; the current interface
-is the CLI/TUI and the FastAPI `/v1` endpoints.
+The old `components/`, `main.py`, `api_cv.py`, `pages/`, `Welcome.py` and related legacy
+files have been **removed**. All development lives in the green-field `src/cvengine/`
+package. The frontend (Streamlit) is out of scope; the current interface is the CLI/TUI
+and the FastAPI `/v1` endpoints.
 
 ## 2. Tech Stack & Tools
 - **Language:** Python 3.14+ (`.python-version` is 3.14)
