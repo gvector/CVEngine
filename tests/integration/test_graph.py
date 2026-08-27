@@ -78,3 +78,24 @@ def test_graph_synthesize_runs_when_requested(chroma_repo):
     )
     state = graph.invoke({"skills": ["Python"], "top_k": 3, "synthesize": True})
     assert state["explanation"] == "Good match on Python."
+
+
+class _UnreachableEnricher:
+    def extract_skills(self, job_description):
+        raise ConnectionError("Ollama is down")
+
+    def expand_queries(self, skills):
+        raise ConnectionError("Ollama is down")
+
+
+def test_graph_degrades_to_base_skills_when_llm_unavailable(chroma_repo):
+    _ingest(chroma_repo, {"RES-1": "PROFESSIONAL SUMMARY\nA.\n\nSKILLS\nPython pandas"})
+    graph = SearchGraph(
+        repo=chroma_repo,
+        enricher=_UnreachableEnricher(),  # type: ignore[arg-type]
+        reranker=None,
+        top_k_per_query=5,
+    )
+    state = graph.invoke({"skills": ["Python"], "top_k": 3})
+    assert state["query_terms"] == ["Python"]
+    assert state["results"][0].resource_id == "RES-1"

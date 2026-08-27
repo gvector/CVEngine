@@ -98,12 +98,22 @@ class SearchGraph:
     @timeit("graph_enrich")
     def _enrich(self, state: SearchState) -> dict[str, Any]:
         skills = list(state.get("skills") or [])
-        if state.get("job_description") and self._enricher is not None:
-            extracted = self._enricher.extract_skills(state["job_description"])
-            skills = skills + [s for s in extracted if s not in skills]
+        query_terms = skills
+        if self._enricher is not None:
+            try:
+                if state.get("job_description"):
+                    extracted = self._enricher.extract_skills(state["job_description"])
+                    skills = skills + [s for s in extracted if s not in skills]
+                if skills:
+                    query_terms = self._enricher.expand_queries(skills)
+            except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
+                log_event(
+                    logger,
+                    "enrichment degraded to base skills",
+                    error=str(exc),
+                )
         if not skills:
             raise ValueError("No skills provided and no skills extracted from the job description")
-        query_terms = self._enricher.expand_queries(skills) if self._enricher is not None else skills
 
         filters_effective: dict[str, Any] | None = None
         business_line = (state.get("filters") or {}).get("business_line")
