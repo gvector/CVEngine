@@ -56,6 +56,23 @@ def test_score_hits_respects_weights():
     assert results[0].resource_id == "b"
 
 
+def test_score_hits_attaches_person_metadata_from_best_chunk():
+    hits = [
+        [
+            ChunkHit(
+                resource_id="a",
+                section="skills",
+                text="Python",
+                keywords=["python"],
+                similarity=1.0,
+                metadata={"resource_name": "Anna", "role": "Engineer", "business_line": "PV"},
+            )
+        ]
+    ]
+    results = score_hits(hits, ["python"], None, top_k=10)
+    assert results[0].person == {"resource_name": "Anna", "role": "Engineer", "business_line": "PV"}
+
+
 def test_score_hits_mismatched_weights_raise():
     with pytest.raises(ValueError):
         score_hits([[]], ["python"], [1.0, 2.0])

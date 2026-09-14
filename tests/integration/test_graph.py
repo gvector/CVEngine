@@ -99,3 +99,32 @@ def test_graph_degrades_to_base_skills_when_llm_unavailable(chroma_repo):
     state = graph.invoke({"skills": ["Python"], "top_k": 3})
     assert state["query_terms"] == ["Python"]
     assert state["results"][0].resource_id == "RES-1"
+
+
+def test_graph_filters_and_person_metadata(chroma_repo):
+    from cvengine.ingestion.pipeline import IngestionPipeline
+
+    pipeline = IngestionPipeline(repo=chroma_repo, sectioner=HeadingSectioner())
+    pipeline.ingest_text(
+        text="PROFESSIONAL SUMMARY\nA.\n\nSKILLS\nPython pandas",
+        resource_id="RES-PY",
+        extra_metadata={"business_line": "PV", "role": "Engineer", "resource_name": "Anna"},
+    )
+    pipeline.ingest_text(
+        text="PROFESSIONAL SUMMARY\nB.\n\nSKILLS\nPython Java",
+        resource_id="RES-GCP",
+        extra_metadata={"business_line": "GCP", "role": "Auditor", "resource_name": "Bruno"},
+    )
+
+    graph = SearchGraph(repo=chroma_repo, enricher=None, reranker=None, top_k_per_query=5)
+    state = graph.invoke(
+        {
+            "skills": ["Python"],
+            "filters": {"business_line": "PV", "role": "Engineer"},
+            "top_k": 5,
+        }
+    )
+    ids = [result.resource_id for result in state["results"]]
+    assert ids == ["RES-PY"]
+    assert state["results"][0].person["resource_name"] == "Anna"
+    assert state["results"][0].person["role"] == "Engineer"

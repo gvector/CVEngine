@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from cvengine.constants import DEFAULT_SECTION_MULTIPLIERS
-from cvengine.db.chroma import ChromaRepository
+from cvengine.db.chroma import ChromaRepository, build_where
 from cvengine.db.schemas import ChunkHit, RankedResource
 from cvengine.llm.base import LLMProvider
 from cvengine.observability import log_event, timeit
@@ -28,6 +28,10 @@ class SearchState(TypedDict, total=False):
     filters: dict[str, Any] | None
     top_k: int
     synthesize: bool
+    rerank: bool
+    top_k_per_query: int | None
+    rerank_top_n: int | None
+    section_multipliers: dict[str, float] | None
     query_terms: list[str]
     filters_effective: dict[str, Any] | None
     grouped_hits: list[list[ChunkHit]]
@@ -115,11 +119,7 @@ class SearchGraph:
         if not skills:
             raise ValueError("No skills provided and no skills extracted from the job description")
 
-        filters_effective: dict[str, Any] | None = None
-        business_line = (state.get("filters") or {}).get("business_line")
-        if business_line:
-            filters_effective = {"business_line": business_line}
-
+        filters_effective = build_where(state.get("filters"))
         log_event(
             logger,
             "search enriched",
@@ -135,7 +135,10 @@ class SearchGraph:
 
     @timeit("graph_retrieve")
     def _retrieve(self, state: SearchState) -> dict[str, Any]:
-        top_k = max(self._top_k_per_query, state.get("top_k") or self._top_k_per_query)
+        top_k = max(
+            state.get("top_k_per_query") or self._top_k_per_query,
+            state.get("top_k") or self._top_k_per_query,
+        )
         grouped = self._repo.query_text(
             queries=state["query_terms"],
             n_results=top_k,
@@ -145,6 +148,8 @@ class SearchGraph:
 
     @timeit("graph_rerank")
     def _rerank_node(self, state: SearchState) -> dict[str, Any]:
+        if self._reranker is None or not state.get("rerank", True):
+            return {}
         flat: list[ChunkHit] = [hit for group in state["grouped_hits"] for hit in group]
         by_key: dict[tuple[str, str], ChunkHit] = {}
         for hit in flat:
@@ -153,19 +158,18 @@ class SearchGraph:
         if not deduped:
             return {}
         query_text = " ".join(state["skills"])
-        if self._reranker is None:
-            return {}
         self._reranker.rerank(query_text, deduped)
         return {"grouped_hits": state["grouped_hits"]}  # objects mutated in place
 
     @timeit("graph_score")
     def _score(self, state: SearchState) -> dict[str, Any]:
         top_k = state.get("top_k") or self._top_k_per_query
+        multipliers = state.get("section_multipliers") or self._multipliers
         results = score_hits(
             grouped_hits=state["grouped_hits"],
             skills=state["skills"],
             weights=state.get("weights"),
-            section_multipliers=self._multipliers,
+            section_multipliers=multipliers,
             alpha=self._alpha,
             beta=self._beta,
             top_k=top_k,

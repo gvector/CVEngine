@@ -3,10 +3,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from cvengine.constants import Section
+
+#: Person fields surfaced on ranked resources (present on every chunk metadata).
+PERSON_METADATA_KEYS = (
+    "resource_name",
+    "role",
+    "company",
+    "business_line",
+    "email",
+    "resume_date",
+    "status",
+    "y_in_pqe",
+    "country_residenza",
+    "city_residenza",
+    "seniority",
+    "years_experience",
+)
+
+
+def person_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Extract the person-facing subset of a chunk metadata dict."""
+    return {key: metadata[key] for key in PERSON_METADATA_KEYS if key in metadata and metadata[key] is not None}
 
 
 class PersonMetadata(BaseModel):
@@ -64,6 +86,7 @@ class ChunkHit:
     keywords: list[str]
     similarity: float
     rerank_score: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -74,4 +97,5 @@ class RankedResource:
     score: float
     best_chunk: str
     skills_hit: dict[str, float]
+    person: dict[str, Any] = field(default_factory=dict)
     explanation: str | None = None

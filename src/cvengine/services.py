@@ -7,7 +7,6 @@ import logging
 from pathlib import Path
 
 from cvengine.config import Settings
-from cvengine.constants import DEFAULT_SECTION_MULTIPLIERS
 from cvengine.db.chroma import ChromaRepository
 from cvengine.embeddings.provider import SentenceTransformerProvider
 from cvengine.ingestion.pipeline import IngestionPipeline
@@ -71,7 +70,9 @@ class CVEngine:
 
     @property
     def reranker(self) -> CrossEncoderReranker | None:
-        """Lazily instantiate the cross-encoder reranker."""
+        """Lazily instantiate the cross-encoder reranker (disabled via config)."""
+        if not self.settings.scoring.rerank:
+            return None
         if self._reranker is None:
             try:
                 self._reranker = CrossEncoderReranker()
@@ -90,7 +91,7 @@ class CVEngine:
                 enricher=self.enricher,
                 reranker=self.reranker,
                 llm=self.llm,
-                section_multipliers=DEFAULT_SECTION_MULTIPLIERS,
+                section_multipliers=self.settings.scoring.section_multipliers,
                 alpha=self.settings.scoring.alpha,
                 beta=self.settings.scoring.beta,
                 top_k_per_query=self.settings.scoring.top_k_per_query,

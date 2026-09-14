@@ -35,6 +35,37 @@ METADATA_KEYS = (
     "source",
 )
 
+#: Metadata fields usable as search filters (mapped to Chroma ``where``).
+FILTER_KEYS = (
+    "business_line",
+    "role",
+    "seniority",
+    "company",
+    "city_residenza",
+    "country_residenza",
+    "status",
+)
+
+
+def build_where(filters: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Translate a flat filters dict into a Chroma ``where`` clause.
+
+    Only keys in :data:`FILTER_KEYS` are considered; multiple conditions are
+    combined with ``$and``.
+
+    :param filters: user-provided filter mapping
+    :return: a Chroma where clause, or ``None`` when there is nothing to filter
+    """
+    conditions: list[dict[str, Any]] = []
+    for key, value in (filters or {}).items():
+        if key in FILTER_KEYS and value is not None and value != "":
+            conditions.append({key: value})
+    if not conditions:
+        return None
+    if len(conditions) == 1:
+        return conditions[0]
+    return {"$and": conditions}
+
 
 class ChromaRepository:
     """Repository over a versioned Chroma collection of CV chunks."""
@@ -166,6 +197,7 @@ class ChromaRepository:
                         text=documents[i][j] if i < len(documents) else "",
                         keywords=keywords,
                         similarity=1.0 - float(distance),
+                        metadata=meta,
                     )
                 )
             grouped.append(hits)

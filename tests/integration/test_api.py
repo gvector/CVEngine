@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from cvengine.api.app import create_app
+from cvengine.config import Settings
 from cvengine.db.schemas import RankedResource
 from cvengine.ingestion.pipeline import IngestionResult
 from cvengine.services import SummaryStore
@@ -64,7 +65,7 @@ def _client(tmp_path):
             "summaries": SummaryStore(tmp_path),
             "llm": FakeLLM({"CV:": "Summary text."}),
             "graph": FakeGraph(),
-            "settings": None,
+            "settings": Settings(),
             "status": lambda self: {"chroma": {"reachable": True, "resources": 1}},
         },
     )()

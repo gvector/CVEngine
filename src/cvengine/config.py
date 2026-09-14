@@ -1,6 +1,8 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cvengine.constants import DEFAULT_SECTION_MULTIPLIERS
+
 
 class LLMSettings(BaseSettings):
     """Configuration for the LLM provider used by agents and extraction."""
@@ -44,6 +46,8 @@ class ScoringSettings(BaseSettings):
     top_k_per_query: int = 30
     default_top_k: int = 20
     rerank_top_n: int = 100
+    rerank: bool = True
+    section_multipliers: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_SECTION_MULTIPLIERS))
 
 
 class Settings(BaseSettings):
@@ -63,3 +67,4 @@ class Settings(BaseSettings):
 
     data_dir: str = "cvengine_data"
     log_level: str = "INFO"
+    ingestion_workers: int = 1

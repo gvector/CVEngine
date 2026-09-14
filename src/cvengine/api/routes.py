@@ -23,6 +23,10 @@ class SearchRequest(BaseModel):
     filters: dict[str, Any] | None = None
     top_k: int = Field(default=20, ge=1, le=200)
     synthesize: bool = False
+    rerank: bool | None = None
+    top_k_per_query: int | None = Field(default=None, ge=1, le=500)
+    rerank_top_n: int | None = Field(default=None, ge=1, le=2000)
+    section_multipliers: dict[str, float] | None = None
 
 
 class IngestRequest(BaseModel):
@@ -60,6 +64,10 @@ class CVEngineRouter:
                     "filters": request.filters,
                     "top_k": request.top_k,
                     "synthesize": request.synthesize,
+                    "rerank": (engine.settings.scoring.rerank if request.rerank is None else request.rerank),
+                    "top_k_per_query": request.top_k_per_query,
+                    "rerank_top_n": request.rerank_top_n,
+                    "section_multipliers": request.section_multipliers,
                 }
             )
             log_event(
@@ -67,6 +75,8 @@ class CVEngineRouter:
                 "search executed",
                 skills=state.get("skills"),
                 top_results=len(state.get("results", [])),
+                filters=request.filters,
+                rerank=state.get("rerank"),
                 synthesize=request.synthesize,
             )
             return {
@@ -88,7 +98,10 @@ class CVEngineRouter:
         @router.post("/cvs/batch")
         def ingest_batch(request: BatchIngestRequest) -> dict[str, Any]:
             try:
-                summary = engine.ingestion.ingest_batch(request.folder)
+                summary = engine.ingestion.ingest_batch(
+                    request.folder,
+                    workers=engine.settings.ingestion_workers,
+                )
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             return summary.model_dump()

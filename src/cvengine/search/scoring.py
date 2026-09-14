@@ -7,7 +7,7 @@ import unicodedata
 from typing import Any
 
 from cvengine.constants import DEFAULT_SECTION_MULTIPLIERS
-from cvengine.db.schemas import ChunkHit, RankedResource
+from cvengine.db.schemas import ChunkHit, RankedResource, person_from_metadata
 
 _ALNUM = re.compile(r"[^a-z0-9]+")
 
@@ -93,7 +93,7 @@ def score_hits(
         for hit in grouped_hits[skill_index]:
             entry = per_resource.setdefault(
                 hit.resource_id,
-                {"bests": {}, "best_chunk": "", "best_score": -1.0},
+                {"bests": {}, "best_chunk": "", "best_score": -1.0, "person": {}},
             )
             value = chunk_score(hit, skills, multipliers, alpha, beta)
             previous = entry["bests"].get(skill, 0.0)
@@ -102,6 +102,7 @@ def score_hits(
             if value > entry["best_score"]:
                 entry["best_score"] = value
                 entry["best_chunk"] = hit.text
+                entry["person"] = person_from_metadata(hit.metadata)
 
     weight_sum = sum(weights)
     ranked: list[RankedResource] = []
@@ -114,6 +115,7 @@ def score_hits(
                 score=round(score, 4),
                 best_chunk=entry["best_chunk"],
                 skills_hit={skill: round(entry["bests"].get(skill, 0.0), 4) for skill in skills},
+                person=entry["person"],
             )
         )
 
