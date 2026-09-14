@@ -45,16 +45,21 @@ uv run cvengine status
 # Inspect the vector store content (no models required)
 uv run cvengine peek
 
-# Ingest a CV file or a whole folder
+# Ingest a CV file or a whole folder (parallel workers for large batches)
 uv run cvengine ingest path/to/cv.docx
-uv run cvengine ingest path/to/folder
+uv run cvengine ingest path/to/folder --workers 4
 
-# Agentic search (degrades to base skills when Ollama is unavailable)
-uv run cvengine search "Python" "Machine Learning" --business-line PV --top-k 20
+# Agentic search with metadata filters (degrades to base skills without Ollama)
+uv run cvengine search "Python" "Machine Learning" \
+  --business-line PV --role Engineer --seniority Senior \
+  --top-k 20 --with-rerank
+
+# Inspect the sections/keywords/metadata of a single resource (no models)
+uv run cvengine inspect RES-0001
 
 # Generate synthetic CVs into the TEST collection and evaluate ranking quality
 uv run cvengine synth --count 100
-uv run cvengine eval --count 100
+uv run cvengine eval --count 100 --report cvengine_data/eval_report.json
 
 # Migrate a legacy pkl archive into Chroma
 uv run cvengine migrate-pkl path/to/archive.pkl
