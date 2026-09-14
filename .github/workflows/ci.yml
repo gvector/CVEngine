@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, "feat/**"]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    services:
+      chroma:
+        image: chromadb/chroma:latest
+        ports:
+          - 8000:8000
+        env:
+          IS_PERSISTENT: "TRUE"
+          ANONYMIZED_TELEMETRY: "FALSE"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Lint
+        run: uv run ruff check src tests
+
+      - name: Format check
+        run: uv run ruff format --check src tests
+
+      - name: Test
+        run: uv run pytest -q
+        env:
+          CVENGINE_CHROMA_HOST: localhost
+          CVENGINE_CHROMA_PORT: "8000"
+          CVENGINE_LLM_PROVIDER: ollama
+          CVENGINE_LLM_BASE_URL: http://localhost:11434

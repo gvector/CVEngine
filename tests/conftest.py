@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
-import tempfile
 
 import pytest
 
@@ -43,17 +41,27 @@ def _chroma_reachable(host: str, port: int) -> bool:
 
 @pytest.fixture
 def chroma_repo(fake_provider):
-    """A repository on a throwaway collection, skipped if Chroma is not running."""
+    """A repository on a fixed throwaway collection, skipped if Chroma is not running.
+
+    A single collection name is reused and recreated fresh before every test to
+    avoid create/delete churn that makes the Chroma server flaky.
+    """
     settings = Settings()
     if not _chroma_reachable(settings.chroma.host, settings.chroma.port):
         pytest.skip("Chroma server not reachable; start with `docker compose up -d`")
-    collection_name = (
-        f"{settings.chroma.test_collection}__pytest__{os.getpid()}__{next(tempfile._get_candidate_names())}"
-    )
+    name = f"{settings.chroma.test_collection}__pytest"
     repo = ChromaRepository(
         host=settings.chroma.host,
         port=settings.chroma.port,
-        collection_name=collection_name,
+        collection_name=name,
+        provider=fake_provider,
+    )
+    with contextlib.suppress(Exception):
+        repo.reset()
+    repo = ChromaRepository(
+        host=settings.chroma.host,
+        port=settings.chroma.port,
+        collection_name=name,
         provider=fake_provider,
     )
     yield repo
