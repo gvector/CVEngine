@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -101,10 +102,14 @@ class IngestionPipeline:
         )
 
     @timeit("ingest_batch")
-    def ingest_batch(self, folder: str | Path) -> IngestionSummary:
+    def ingest_batch(self, folder: str | Path, workers: int = 1) -> IngestionSummary:
         """Ingest every supported CV file inside a folder.
 
+        Files are processed in a thread pool when ``workers > 1``; each file is
+        isolated so a failure never aborts the whole batch.
+
         :param folder: directory containing CV documents
+        :param workers: number of concurrent workers (1 = sequential)
         :return: aggregate ingestion summary
         """
         folder_path = Path(folder)
@@ -112,29 +117,17 @@ class IngestionPipeline:
             raise FileNotFoundError(f"Not a directory: {folder_path}")
 
         files = sorted(p for p in folder_path.iterdir() if p.suffix.lower() in SUPPORTED_EXTENSIONS)
-        results: list[IngestionResult] = []
-        for file_path in files:
-            try:
-                results.append(self.ingest_file(file_path))
-            except Exception as exc:  # noqa: BLE001 - per-file isolation
-                log_event(
-                    logger,
-                    "batch item failed",
-                    file=str(file_path),
-                    error=str(exc),
-                )
-                results.append(
-                    IngestionResult(
-                        resource_id=file_path.name,
-                        status="failed",
-                        error=str(exc),
-                    )
-                )
+        workers = max(1, workers)
+        if workers == 1:
+            results = [self._ingest_one(file_path) for file_path in files]
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                results = list(executor.map(self._ingest_one, files))
 
         counts = {status: 0 for status in ("indexed", "skipped", "failed")}
         for result in results:
             counts[result.status] += 1
-        log_event(logger, "batch completed", **counts)
+        log_event(logger, "batch completed", workers=workers, **counts)
         return IngestionSummary(
             total=len(results),
             indexed=counts["indexed"],
@@ -142,6 +135,22 @@ class IngestionPipeline:
             failed=counts["failed"],
             results=results,
         )
+
+    def _ingest_one(self, file_path: Path) -> IngestionResult:
+        try:
+            return self.ingest_file(file_path)
+        except Exception as exc:  # noqa: BLE001 - per-file isolation
+            log_event(
+                logger,
+                "batch item failed",
+                file=str(file_path),
+                error=str(exc),
+            )
+            return IngestionResult(
+                resource_id=file_path.name,
+                status="failed",
+                error=str(exc),
+            )
 
     def _ingest(
         self,

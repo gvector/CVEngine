@@ -81,3 +81,13 @@ def test_ingest_batch_processes_txt_files(tmp_path):
     summary = pipeline.ingest_batch(tmp_path)
     assert summary.total == 2
     assert summary.indexed == 2
+
+
+def test_ingest_batch_with_workers(tmp_path):
+    for index in range(4):
+        (tmp_path / f"cv{index}.txt").write_text(CV_TEXT.replace("Python", f"Skill{index}"))
+    pipeline = _pipeline()
+    summary = pipeline.ingest_batch(tmp_path, workers=2)
+    assert summary.total == 4
+    assert summary.indexed == 4
+    assert summary.failed == 0
