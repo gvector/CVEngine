@@ -22,6 +22,25 @@ MSc Computer Science
     assert output.resource_name is None
 
 
+def test_heading_sectioner_extracts_skill_keywords():
+    text = """SKILLS
+Python, pandas, NumPy
+
+CERTIFICATIONS
+AWS Certified Developer, CKA
+"""
+    output = HeadingSectioner().structure(text)
+    by_section = {s.section: s for s in output.sections}
+    assert by_section[Section.SKILLS].keywords == ["Python", "pandas", "NumPy"]
+    assert by_section[Section.CERTIFICATIONS].keywords == ["AWS Certified Developer", "CKA"]
+
+
+def test_heading_sectioner_no_keywords_for_experience():
+    text = "EXPERIENCE\nBuilt pipelines, led teams"
+    output = HeadingSectioner().structure(text)
+    assert output.sections[0].keywords == []
+
+
 def test_heading_sectioner_falls_back_to_other():
     text = "just a flat line\nanother line"
     sections = to_cv_sections(HeadingSectioner().structure(text))
