@@ -34,6 +34,7 @@ class ChromaSettings(BaseSettings):
     port: int = 8000
     collection: str = "cvs__nomic-embed-text-v1.5__v1"
     test_collection: str = "cvs__nomic-embed-text-v1.5__v1__test"
+    synth_collection: str = "cvs__nomic-embed-text-v1.5__v1__synth"
 
 
 class ScoringSettings(BaseSettings):

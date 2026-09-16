@@ -15,14 +15,30 @@ from cvengine.db.chroma import ChromaRepository
 from cvengine.ingestion.pipeline import IngestionPipeline
 from cvengine.ingestion.sectioner import HeadingSectioner
 from cvengine.observability import setup_logging
-from cvengine.search.enrich import QueryEnricher
 from cvengine.search.graph import SearchGraph
 from cvengine.services import CVEngine
-from cvengine.synthetic.generator import generate_batch, generate_profiles
+from cvengine.synthetic import build_cv_text, build_manifest, generate_profiles, profile_metadata
 
 app = typer.Typer(help="CVEngine - CV processing and agentic search")
 console = Console()
 logger = logging.getLogger("cvengine")
+
+
+def ndcg_at_k(gains: list[int], k: int) -> float:
+    """Compute NDCG@k for a list of relevance gains (higher is better).
+
+    :param gains: relevance of each ranked result, best-first
+    :param k: cutoff
+    :return: the NDCG@k in [0, 1]
+    """
+    import math
+
+    def dcg(values: list[int]) -> float:
+        return sum(gain / math.log2(index + 2) for index, gain in enumerate(values[:k]))
+
+    ideal = sorted(gains, reverse=True)
+    ideal_dcg = dcg(ideal)
+    return dcg(gains) / ideal_dcg if ideal_dcg else 0.0
 
 
 def _engine(collection: str | None = None) -> CVEngine:
@@ -218,72 +234,71 @@ def search(
 
 @app.command()
 def synth(
-    count: int = typer.Option(50, "--count", help="Number of synthetic CVs"),
+    count: int = typer.Option(400, "--count", help="Number of synthetic CVs"),
     seed: int = typer.Option(42, "--seed", help="Random seed"),
+    collection: str = typer.Option(None, "--collection", "-c", help="Target collection name"),
+    manifest: Path = typer.Option(None, "--manifest", help="Where to write the ground-truth manifest"),
+    reset: bool = typer.Option(False, "--reset", help="Drop the collection before ingesting"),
 ) -> None:
-    """Generate synthetic CVs and ingest them into the TEST collection."""
-    settings = Settings()
-    engine = _engine(settings.chroma.test_collection)
-    engine.ingestion = IngestionPipeline(
-        repo=engine.repo,
-        sectioner=HeadingSectioner(),
-    )
-    profiles = generate_batch(count, seed=seed)
-    with console.status(f"Ingesting {count} synthetic CVs..."):
-        for profile, text in profiles:
-            engine.ingestion.ingest_text(
-                text=text,
-                resource_id=profile.resource_id,
-                extra_metadata=_profile_metadata(profile),
-            )
-    console.print(f"Ingested {count} synthetic CVs into '{engine.repo.collection_name}'")
-
-
-def _profile_metadata(profile) -> dict:
-    """Map a SyntheticProfile onto the chunk metadata schema."""
-    return {
-        "resource_name": profile.name,
-        "role": profile.role,
-        "business_line": profile.business_line,
-        "seniority": profile.seniority,
-        "years_experience": profile.years_experience,
-        "languages": profile.languages,
-        "certifications": profile.certifications,
-        "source": "synthetic",
-    }
-
-
-@app.command()
-def eval(
-    count: int = typer.Option(50, "--count", help="Number of synthetic CVs"),
-    seed: int = typer.Option(42, "--seed", help="Random seed"),
-    top_k: int = typer.Option(10, "--top-k", help="Number of results per query"),
-    with_rerank: bool = typer.Option(False, "--with-rerank", help="Enable the reranker"),
-    report: Path = typer.Option(None, "--report", help="Write a JSON report to this path"),
-) -> None:
-    """Evaluate ranking quality on the synthetic dataset (precision@k / MRR)."""
+    """Generate consulting-firm synthetic CVs and ingest them into the __synth collection."""
     import json
 
     settings = Settings()
-    engine = _engine(settings.chroma.test_collection)
-    engine.ingestion = IngestionPipeline(
-        repo=engine.repo,
-        sectioner=HeadingSectioner(),
-    )
+    target = collection or settings.chroma.synth_collection
+    engine = _engine(target)
+    if reset:
+        engine.repo.reset()
+        engine.repo = ChromaRepository(
+            host=engine.settings.chroma.host,
+            port=engine.settings.chroma.port,
+            collection_name=target,
+            provider=engine.embedding,
+        )
+    engine.ingestion = IngestionPipeline(repo=engine.repo, sectioner=HeadingSectioner())
 
     profiles = generate_profiles(count, seed=seed)
-    profiles_with_text = generate_batch(count, seed=seed)
     with console.status(f"Ingesting {count} synthetic CVs..."):
-        for profile, text in profiles_with_text:
+        for profile in profiles:
             engine.ingestion.ingest_text(
-                text=text,
+                text=build_cv_text(profile),
                 resource_id=profile.resource_id,
-                extra_metadata=_profile_metadata(profile),
+                extra_metadata=profile_metadata(profile),
             )
 
+    manifest_path = manifest or Path(settings.data_dir) / "synth_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(build_manifest(profiles, seed=seed), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    console.print(f"Ingested {count} synthetic CVs into '{engine.repo.collection_name}'")
+    console.print(f"Ground-truth manifest written to {manifest_path}")
+
+
+@app.command("eval-rank")
+def eval_rank(
+    manifest: Path = typer.Option(None, "--manifest", help="Ground-truth manifest path"),
+    collection: str = typer.Option(None, "--collection", "-c", help="Collection name"),
+    top_k: int = typer.Option(10, "--top-k", help="Results per query"),
+    with_rerank: bool = typer.Option(False, "--with-rerank", help="Enable the reranker"),
+    report: Path = typer.Option(None, "--report", help="Write a JSON report to this path"),
+) -> None:
+    """Verify that the ranking surfaces the most competent resources (NDCG@k / MRR)."""
+    import json
+
+    settings = Settings()
+    manifest_path = manifest or Path(settings.data_dir) / "synth_manifest.json"
+    if not manifest_path.exists():
+        console.print(f"[red]Manifest not found: {manifest_path}. Run `cvengine synth` first.[/red]")
+        raise typer.Exit(code=1)
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    resources = data["resources"]
+    level_rank = data["levels"]
+
+    engine = _engine(collection or settings.chroma.synth_collection)
     graph = SearchGraph(
         repo=engine.repo,
-        enricher=QueryEnricher(engine.llm),
+        enricher=None,
         reranker=engine.reranker if with_rerank else None,
         section_multipliers=settings.scoring.section_multipliers,
         alpha=settings.scoring.alpha,
@@ -292,55 +307,59 @@ def eval(
         rerank_top_n=settings.scoring.rerank_top_n,
     )
 
-    details: dict[str, dict] = {}
-    precision_total = 0.0
+    # Group resources by their primary skill so we can build targeted queries.
+    by_skill: dict[str, list[dict]] = {}
+    for resource in resources:
+        for skill in resource["primary_skills"]:
+            by_skill.setdefault(skill, []).append(resource)
+
+    ndcg_total = 0.0
     mrr_total = 0.0
+    precision_total = 0.0
     queries = 0
-    for profile in profiles:
-        primary_skill = profile.skills[0]
-        state = graph.invoke(
-            {
-                "skills": [primary_skill],
-                "top_k": top_k,
-                "synthesize": False,
-                "rerank": with_rerank,
-            }
-        )
-        ids = [result.resource_id for result in state["results"]]
-        hit = profile.resource_id in ids
-        rank = ids.index(profile.resource_id) + 1 if hit else None
-        if hit:
-            precision_total += 1.0
-            mrr_total += 1.0 / rank
+    details: dict[str, dict] = {}
+
+    for skill, candidates in by_skill.items():
+        expected = sorted(candidates, key=lambda r: level_rank[r["level"]], reverse=True)
+        relevant = {r["resource_id"] for r in candidates}
+        state = graph.invoke({"skills": [skill], "top_k": top_k, "rerank": with_rerank})
+        ranked_ids = [result.resource_id for result in state["results"]]
+
+        gains = [
+            level_rank[next((r["level"] for r in candidates if r["resource_id"] == rid), "low")] for rid in ranked_ids
+        ]
+        ndcg = ndcg_at_k(gains, k=top_k)
+        ndcg_total += ndcg
+
+        hit_rank = next((i + 1 for i, rid in enumerate(ranked_ids) if rid in relevant), None)
+        if hit_rank:
+            mrr_total += 1.0 / hit_rank
+            precision_total += len([rid for rid in ranked_ids if rid in relevant]) / top_k
         queries += 1
-        details[profile.resource_id] = {
-            "skill": primary_skill,
-            "business_line": profile.business_line,
-            "hit": hit,
-            "rank": rank,
+        details[skill] = {
+            "expected_top": expected[0]["resource_id"] if expected else None,
+            "top_result": ranked_ids[0] if ranked_ids else None,
+            "ndcg": round(ndcg, 4),
+            "hit_rank": hit_rank,
         }
 
-    precision = round(precision_total / queries, 4)
-    mrr = round(mrr_total / queries, 4)
-    console.print(f"Queries: {queries}")
-    console.print(f"precision@{top_k}: {precision}")
-    console.print(f"MRR: {mrr}")
+    summary = {
+        "queries": queries,
+        "ndcg_at_k": round(ndcg_total / queries, 4) if queries else 0.0,
+        "mrr": round(mrr_total / queries, 4) if queries else 0.0,
+        "precision_at_k": round(precision_total / queries, 4) if queries else 0.0,
+        "top_k": top_k,
+        "rerank": with_rerank,
+        "details": details,
+    }
+    console.print(f"Queries: {summary['queries']}")
+    console.print(f"NDCG@{top_k}: {summary['ndcg_at_k']}")
+    console.print(f"MRR: {summary['mrr']}")
+    console.print(f"precision@{top_k}: {summary['precision_at_k']}")
 
     if report is not None:
-        payload = {
-            "count": count,
-            "seed": seed,
-            "top_k": top_k,
-            "rerank": with_rerank,
-            "alpha": settings.scoring.alpha,
-            "beta": settings.scoring.beta,
-            "section_multipliers": settings.scoring.section_multipliers,
-            "precision_at_k": precision,
-            "mrr": mrr,
-            "details": details,
-        }
         report.parent.mkdir(parents=True, exist_ok=True)
-        report.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        report.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
         console.print(f"Report written to {report}")
 
 
