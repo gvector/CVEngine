@@ -166,6 +166,8 @@ rimandati al futuro, configurazione **solo env**, dedup **solo content-hash**.
 - **Competence boost** ✅ *implementato* (vedi SYNTHESIS.md): `CVENGINE_SCORING_COMPETENCE_WEIGHT`
   (default 0) aggiunge `peso × seniorità` allo score. Su 400 CV sintetici porta NDCG@10
   da 0.83 a 0.98 e il top-1 `professional` da 13/97 a 85/97. Da **calibrare sui dati reali**.
+- **Visualizzatore Chroma** ✅ *implementato*: pagina read-only `/viewer` (browse + query
+  client-side) nell'API FastAPI, attivabile con `CVENGINE_VIEWER_ENABLED` o `cvengine serve --viewer`.
 - **Retrieval ibrido**: fusione vettoriale + lessicale (BM25/TF-IDF) con RRF
   (Reciprocal Rank Fusion) e pesi configurabili.
 - **Loop di refine nell'agente**: retrieve → critica → raffina query → re-retrieve

@@ -66,8 +66,11 @@ uv run cvengine eval-rank --report cvengine_data/eval_rank.json
 # Migrate a legacy pkl archive into Chroma
 uv run cvengine migrate-pkl path/to/archive.pkl
 
-# Run the FastAPI server (OpenAPI docs at http://localhost:8000/docs)
-uv run uvicorn cvengine.api.app:create_app --factory --reload
+# Run the FastAPI server (API docs at http://localhost:8001/docs)
+uv run cvengine serve
+
+# Same, but also enable the read-only Chroma viewer at http://localhost:8001/viewer
+uv run cvengine serve --viewer
 ```
 
 Programmatic example:

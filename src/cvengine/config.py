@@ -70,3 +70,4 @@ class Settings(BaseSettings):
     data_dir: str = "cvengine_data"
     log_level: str = "INFO"
     ingestion_workers: int = 1
+    viewer_enabled: bool = False

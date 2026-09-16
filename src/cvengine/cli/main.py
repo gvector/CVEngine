@@ -371,6 +371,26 @@ def eval_rank(
         console.print(f"Report written to {report}")
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
+    port: int = typer.Option(8001, "--port", "-p", help="Bind port (Chroma uses 8000)"),
+    viewer: bool = typer.Option(None, "--viewer/--no-viewer", help="Enable the /viewer page"),
+) -> None:
+    """Run the FastAPI server (API + optional /viewer page)."""
+    import uvicorn
+
+    from cvengine.api.app import create_app
+    from cvengine.services import CVEngine
+
+    engine = CVEngine()
+    if viewer is not None:
+        engine.settings.viewer_enabled = viewer
+    app = create_app(engine)
+    console.print(f"API on http://localhost:{port}/docs — viewer: {engine.settings.viewer_enabled}")
+    uvicorn.run(app, host=host, port=port)
+
+
 @app.command("migrate-pkl")
 def migrate_pkl(path: Path = typer.Argument(..., help="Path to the legacy .pkl archive")) -> None:
     """Re-index a legacy pkl archive through the ingestion pipeline."""
