@@ -57,9 +57,11 @@ uv run cvengine search "Python" "Machine Learning" \
 # Inspect the sections/keywords/metadata of a single resource (no models)
 uv run cvengine inspect RES-0001
 
-# Generate synthetic CVs into the TEST collection and evaluate ranking quality
-uv run cvengine synth --count 100
-uv run cvengine eval --count 100 --report cvengine_data/eval_report.json
+# Generate consulting-firm synthetic CVs (400 by default) into the __synth collection
+uv run cvengine synth --count 400 --reset
+
+# Verify the ranking surfaces the most competent resources (NDCG@k / MRR)
+uv run cvengine eval-rank --report cvengine_data/eval_rank.json
 
 # Migrate a legacy pkl archive into Chroma
 uv run cvengine migrate-pkl path/to/archive.pkl
