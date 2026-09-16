@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -177,11 +178,12 @@ HEADING_MAP: dict[str, Section] = {
 class HeadingSectioner:
     """Deterministic sectioner that splits a CV on uppercase heading lines.
 
-    Used for evaluation and tests where an LLM dependency is not desired.
+    Used for evaluation and tests where an LLM dependency is not desired. It also
+    extracts comma-separated keywords from the ``skills``/``certifications``/
+    ``languages`` sections so the keyword-boost path is exercised without an LLM.
     """
 
-    def __init__(self) -> None:
-        self._heading_pattern = None
+    KEYWORD_SECTIONS = (Section.SKILLS, Section.CERTIFICATIONS, Section.LANGUAGES)
 
     def structure(self, text: str) -> SectioningOutput:
         sections: list[SectionEntry] = []
@@ -191,7 +193,13 @@ class HeadingSectioner:
         def flush() -> None:
             body = "\n".join(current_lines).strip()
             if body:
-                sections.append(SectionEntry(section=current_section, text=body, keywords=[]))
+                sections.append(
+                    SectionEntry(
+                        section=current_section,
+                        text=body,
+                        keywords=self._keywords(current_section, body),
+                    )
+                )
 
         for raw_line in text.splitlines():
             line = raw_line.strip()
@@ -209,3 +217,14 @@ class HeadingSectioner:
         if not non_empty:
             non_empty = [SectionEntry(section=Section.OTHER, text=text)]
         return SectioningOutput(sections=non_empty)
+
+    @classmethod
+    def _keywords(cls, section: Section, text: str) -> list[str]:
+        if section not in cls.KEYWORD_SECTIONS:
+            return []
+        keywords: list[str] = []
+        for part in re.split(r"[,\n;]", text):
+            term = part.strip().strip("-").strip()
+            if term and term.lower() != "none":
+                keywords.append(term)
+        return keywords

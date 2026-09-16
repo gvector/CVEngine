@@ -1,103 +1,182 @@
-"""Synthetic CV generation for testing and evaluation."""
+"""Synthetic CV generation for a consulting firm.
+
+Builds a controlled, verifiable dataset: each resource has a branch, a role, a
+competence level and a primary skill cluster. The CV text is generated from
+deterministic templates (no LLM) so the ground truth is exact.
+"""
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
 
-BUSINESS_LINES = ["PV", "C&Q", "CSV", "GCP", "RA", "COMP", "DG", "ENG", "MD", "IT"]
+from faker import Faker
 
-SKILL_POOL: dict[str, list[str]] = {
-    "python": ["Python", "pandas", "NumPy", "scikit-learn", "FastAPI", "Pytest"],
-    "machine_learning": [
-        "Machine Learning",
-        "Deep Learning",
-        "PyTorch",
-        "TensorFlow",
-        "NLP",
-        "Transformers",
-    ],
-    "data_analysis": ["SQL", "Tableau", "Power BI", "Excel", "Data Analysis", "ETL"],
-    "pharmacovigilance": [
-        "Adverse Event",
-        "PBRER",
-        "PSMF",
-        "EU GVP Module VI",
-        "Argus",
-        "Signal Detection",
-    ],
-    "validation": ["IQ", "OQ", "PQ", "Computer System Validation", "GAMP 5", "GxP"],
-    "audit": ["GMP Audit", "GLP Audit", "GCP Inspection", "ISO 19011", "QMS"],
-    "devops": ["Docker", "Kubernetes", "CI/CD", "Terraform", "AWS", "Linux"],
+from cvengine.synthetic.domain import (
+    BRANCHES,
+    EDUCATION,
+    LANGUAGES,
+    LEVEL_ORDER,
+    LEVEL_PROFILES,
+    SECONDARY_SKILL_POOL,
+    Branch,
+    Level,
+    Role,
+    all_role_cells,
+)
+
+_LEVEL_SUMMARY = {
+    Level.LOW: "Eager to grow and contribute to structured, well-scoped workstreams.",
+    Level.MEDIUM: "Focused on delivering reliable results across multiple workstreams.",
+    Level.HIGH: "Trusted to lead complex engagements and mentor junior colleagues.",
+    Level.PROFESSIONAL: "Recognized expert driving strategy and cross-functional programs.",
 }
-
-NAMES = [
-    "Anna Rossi",
-    "Marco Bianchi",
-    "Luca Verdi",
-    "Giulia Neri",
-    "Paolo Gallo",
-    "Elena Moretti",
-    "Francesco Greco",
-    "Sara Conti",
-    "Davide Fontana",
-    "Chiara Marino",
-]
-
-ROLES = [
-    "Data Scientist",
-    "Machine Learning Engineer",
-    "Pharmacovigilance Specialist",
-    "Validation Engineer",
-    "QA Auditor",
-    "Data Analyst",
-    "DevOps Engineer",
-]
-
-SENIORITIES = ["Junior", "Mid", "Senior", "Lead"]
 
 
 @dataclass
 class SyntheticProfile:
-    """A controlled CV profile used to verify ranking behaviour."""
+    """A controlled CV profile with its known ground truth."""
 
     resource_id: str
     name: str
+    email: str
+    city: str
+    country: str
+    branch: str
+    branch_name: str
     role: str
-    business_line: str
+    level: Level
     seniority: str
     years_experience: float
-    skills: list[str] = field(default_factory=list)
-    languages: list[str] = field(default_factory=list)
+    primary_skills: list[str] = field(default_factory=list)
+    secondary_skills: list[str] = field(default_factory=list)
     certifications: list[str] = field(default_factory=list)
+    languages: list[str] = field(default_factory=list)
+    projects: int = 1
+    education: str = "Master of Science"
+
+
+def _cell_distribution(total: int, cells: int) -> list[int]:
+    """Distribute ``total`` items across ``cells`` as evenly as possible."""
+    base, remainder = divmod(total, cells)
+    return [base + (1 if index < remainder else 0) for index in range(cells)]
+
+
+def _make_fakers(seed: int) -> tuple[Faker, Faker]:
+    italian = Faker("it_IT")
+    english = Faker("en_US")
+    italian.seed_instance(seed)
+    english.seed_instance(seed)
+    return italian, english
+
+
+def _sample(rng: random.Random, pool: tuple[str, ...], k: int) -> list[str]:
+    k = max(0, min(k, len(pool)))
+    return rng.sample(list(pool), k=k)
+
+
+def _build_profile(
+    rng: random.Random,
+    index: int,
+    branch: Branch,
+    role: Role,
+    level: Level,
+    italian: Faker,
+    english: Faker,
+) -> SyntheticProfile:
+    level_profile = LEVEL_PROFILES[level]
+    faker = italian if rng.random() < 0.5 else english
+    name = faker.name()
+    first, _, last = name.partition(" ")
+    email = f"{first.lower()}.{last.lower().replace(' ', '')}@example.com"
+
+    primary_k = rng.randint(*level_profile.primary_skills)
+    secondary_k = rng.randint(*level_profile.secondary_skills)
+    cert_k = rng.randint(*level_profile.certifications)
+
+    return SyntheticProfile(
+        resource_id=f"SYN-{index:04d}",
+        name=name,
+        email=email,
+        city=faker.city(),
+        country=faker.current_country() or ("Italy" if faker is italian else "United States"),
+        branch=branch.code,
+        branch_name=branch.name,
+        role=role.name,
+        level=level,
+        seniority=level_profile.seniority,
+        years_experience=round(rng.uniform(level_profile.years_min, level_profile.years_max), 1),
+        primary_skills=_sample(rng, role.primary_skills, primary_k),
+        secondary_skills=_sample(rng, SECONDARY_SKILL_POOL, secondary_k),
+        certifications=_sample(rng, role.certifications, cert_k),
+        languages=["English", *rng.sample([lang for lang in LANGUAGES if lang != "English"], k=rng.randint(0, 2))],
+        projects=rng.randint(*level_profile.projects),
+        education=rng.choice(EDUCATION),
+    )
+
+
+def generate_profiles(
+    count: int = 400,
+    seed: int = 42,
+) -> list[SyntheticProfile]:
+    """Generate a deterministic, evenly distributed list of synthetic profiles.
+
+    :param count: total number of profiles
+    :param seed: random seed for reproducibility
+    :return: the generated profiles
+    """
+    rng = random.Random(seed)
+    italian, english = _make_fakers(seed)
+
+    cells = all_role_cells()
+    levels = list(Level)
+    # Build the full (branch, role, level) matrix and distribute the count over it.
+    matrix = [(branch, role, level) for branch, role in cells for level in levels]
+    distribution = _cell_distribution(count, len(matrix))
+
+    profiles: list[SyntheticProfile] = []
+    index = 1
+    for (branch, role, level), amount in zip(matrix, distribution, strict=True):
+        for _ in range(amount):
+            profiles.append(_build_profile(rng, index, branch, role, level, italian, english))
+            index += 1
+    return profiles
 
 
 def build_cv_text(profile: SyntheticProfile) -> str:
-    """Render a synthetic CV body from a profile.
+    """Render a synthetic CV body (English) that encodes the competence level.
 
     :param profile: the controlled profile
-    :return: a plain-text CV
+    :return: a plain-text CV with canonical section headings
     """
-    skills = ", ".join(profile.skills)
-    languages = ", ".join(profile.languages) or "Italian (native), English (professional)"
-    certifications = ", ".join(profile.certifications) or "None"
-    company = "Acme Solutions"
+    level_profile = LEVEL_PROFILES[profile.level]
+    skills = ", ".join([*profile.primary_skills, *profile.secondary_skills])
+    certifications = ", ".join(profile.certifications) if profile.certifications else "None"
+    languages = ", ".join(profile.languages)
+    headline = ", ".join(profile.primary_skills[:3]) or profile.role
+
+    experience_lines: list[str] = []
+    for project_index in range(profile.projects):
+        verb = level_profile.verbs[project_index % len(level_profile.verbs)]
+        skill = profile.primary_skills[project_index % len(profile.primary_skills)]
+        experience_lines.append(
+            f"- {verb.capitalize()} {skill} activities for a {profile.branch_name} client, "
+            f"delivering measurable outcomes across {project_index + 1} workstream(s)."
+        )
+
     return f"""PROFESSIONAL SUMMARY
-{profile.seniority} {profile.role} with {profile.years_experience:.0f} years of experience in {profile.business_line}.
-Passionate about delivering high quality results and continuously improving processes.
+{profile.seniority} {profile.role} with {profile.years_experience:.0f} years of experience in {profile.branch_name}.
+Specializing in {headline}. {_LEVEL_SUMMARY[profile.level]}
 
 SKILLS
 {skills}
 
 PROFESSIONAL EXPERIENCE
-{profile.role} - {company}
-- Applied {skills} daily to deliver projects in the {profile.business_line} domain.
-- Collaborated with cross-functional teams and stakeholders.
-- Improved process efficiency and quality of deliverables.
+{profile.role} - Consulting Firm
+{chr(10).join(experience_lines)}
 
 EDUCATION
-Master of Science in Computer Science
-Bachelor of Science in Engineering
+{profile.education} in a relevant field
 
 CERTIFICATIONS
 {certifications}
@@ -107,53 +186,52 @@ LANGUAGES
 """
 
 
-def generate_profiles(count: int, seed: int = 42, business_lines: list[str] | None = None) -> list[SyntheticProfile]:
-    """Generate a deterministic list of synthetic CV profiles.
-
-    :param count: number of profiles to generate
-    :param seed: random seed for reproducibility
-    :param business_lines: allowed business lines (defaults to all)
-    :return: the generated profiles
-    """
-    rng = random.Random(seed)
-    lines = business_lines or BUSINESS_LINES
-    profiles: list[SyntheticProfile] = []
-    for index in range(count):
-        profile_skills = [rng.choice(list(SKILL_POOL.keys()))]
-        if rng.random() < 0.5 and len(SKILL_POOL) > 1:
-            second = rng.choice([k for k in SKILL_POOL if k != profile_skills[0]])
-            profile_skills.append(second)
-        skills = [
-            skill
-            for key in profile_skills
-            for skill in rng.sample(SKILL_POOL[key], k=rng.randint(2, len(SKILL_POOL[key])))
-        ]
-        profiles.append(
-            SyntheticProfile(
-                resource_id=f"RES-{index + 1:04d}",
-                name=rng.choice(NAMES),
-                role=rng.choice(ROLES),
-                business_line=rng.choice(lines),
-                seniority=rng.choice(SENIORITIES),
-                years_experience=round(rng.uniform(1.0, 15.0), 1),
-                skills=skills,
-                languages=rng.sample(["English", "Italian", "French", "Spanish"], k=rng.randint(1, 3)),
-                certifications=rng.sample(
-                    ["ISTQB", "PMP", "GCP Certificate", "Six Sigma", "AWS Solutions Architect"],
-                    k=rng.randint(0, 2),
-                ),
-            )
-        )
-    return profiles
-
-
 def generate_batch(
-    count: int,
+    count: int = 400,
     seed: int = 42,
-    business_lines: list[str] | None = None,
 ) -> list[tuple[SyntheticProfile, str]]:
-    """Generate profiles paired with their CV text bodies."""
-    return [
-        (profile, build_cv_text(profile))
-        for profile in generate_profiles(count, seed=seed, business_lines=business_lines)
-    ]
+    """Generate profiles paired with their rendered CV text."""
+    return [(profile, build_cv_text(profile)) for profile in generate_profiles(count, seed=seed)]
+
+
+def build_manifest(profiles: list[SyntheticProfile], seed: int = 42) -> dict:
+    """Build the ground-truth manifest used by the ranking evaluation."""
+    return {
+        "seed": seed,
+        "count": len(profiles),
+        "levels": {level.value: LEVEL_ORDER[level] for level in Level},
+        "branches": [branch.code for branch in BRANCHES],
+        "resources": [
+            {
+                "resource_id": profile.resource_id,
+                "name": profile.name,
+                "branch": profile.branch,
+                "role": profile.role,
+                "level": profile.level.value,
+                "seniority": profile.seniority,
+                "years_experience": profile.years_experience,
+                "primary_skills": profile.primary_skills,
+                "secondary_skills": profile.secondary_skills,
+                "certifications": profile.certifications,
+                "languages": profile.languages,
+            }
+            for profile in profiles
+        ],
+    }
+
+
+def profile_metadata(profile: SyntheticProfile) -> dict:
+    """Map a profile onto the chunk metadata schema used by ingestion."""
+    return {
+        "resource_name": profile.name,
+        "email": profile.email,
+        "city_residenza": profile.city,
+        "country_residenza": profile.country,
+        "role": profile.role,
+        "business_line": profile.branch,
+        "seniority": profile.seniority,
+        "years_experience": profile.years_experience,
+        "languages": profile.languages,
+        "certifications": profile.certifications,
+        "source": "synthetic",
+    }
