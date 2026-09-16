@@ -163,10 +163,9 @@ rimandati al futuro, configurazione **solo env**, dedup **solo content-hash**.
 
 ## 4. Idee per implementazioni future
 
-- **Segnale di competenza nel ranking** *(emerso dal dataset sintetico, vedi SYNTHESIS.md)*:
-  la cosine favorisce i CV corti → il top-1 non è sempre il più competente (NDCG@10 0.83).
-  Proposta: boost configurabile da seniority/years_experience nei metadata
-  (es. `score += w_comp · (level_rank/4)`), `CVENGINE_SCORING_COMPETENCE_WEIGHT` default 0.
+- **Competence boost** ✅ *implementato* (vedi SYNTHESIS.md): `CVENGINE_SCORING_COMPETENCE_WEIGHT`
+  (default 0) aggiunge `peso × seniorità` allo score. Su 400 CV sintetici porta NDCG@10
+  da 0.83 a 0.98 e il top-1 `professional` da 13/97 a 85/97. Da **calibrare sui dati reali**.
 - **Retrieval ibrido**: fusione vettoriale + lessicale (BM25/TF-IDF) con RRF
   (Reciprocal Rank Fusion) e pesi configurabili.
 - **Loop di refine nell'agente**: retrieve → critica → raffina query → re-retrieve

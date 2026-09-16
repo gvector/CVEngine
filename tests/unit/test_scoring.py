@@ -1,7 +1,12 @@
 import pytest
 
 from cvengine.db.schemas import ChunkHit
-from cvengine.search.scoring import chunk_score, keyword_overlap, score_hits
+from cvengine.search.scoring import (
+    chunk_score,
+    competence_from_metadata,
+    keyword_overlap,
+    score_hits,
+)
 
 
 def _hit(resource_id, section, text, keywords, similarity, rerank=None):
@@ -76,3 +81,36 @@ def test_score_hits_attaches_person_metadata_from_best_chunk():
 def test_score_hits_mismatched_weights_raise():
     with pytest.raises(ValueError):
         score_hits([[]], ["python"], [1.0, 2.0])
+
+
+def test_competence_from_seniority():
+    assert competence_from_metadata({"seniority": "Lead"}) == 1.0
+    assert competence_from_metadata({"seniority": "junior"}) == 0.25
+    assert competence_from_metadata({}) == 0.0
+
+
+def test_competence_from_years_fallback():
+    assert competence_from_metadata({"years_experience": 10}) == 0.5
+    assert competence_from_metadata({"years_experience": 5}) == 0.25
+    assert competence_from_metadata({"years_experience": 0}) == 0.0
+
+
+def test_competence_boost_raises_senior_score():
+    junior = _hit("r1", "skills", "Python", ["python"], 0.5, rerank=0.5)
+    junior.metadata = {"seniority": "Junior"}
+    expert = _hit("r2", "skills", "Python", ["python"], 0.5, rerank=0.5)
+    expert.metadata = {"seniority": "Lead"}
+
+    base_junior = chunk_score(junior, ["python"], {"skills": 1.0}, alpha=0.8, beta=0.2)
+    base_expert = chunk_score(expert, ["python"], {"skills": 1.0}, alpha=0.8, beta=0.2)
+    assert base_junior == base_expert
+
+    boost_junior = chunk_score(junior, ["python"], {"skills": 1.0}, alpha=0.8, beta=0.2, competence_weight=0.2)
+    boost_expert = chunk_score(expert, ["python"], {"skills": 1.0}, alpha=0.8, beta=0.2, competence_weight=0.2)
+    assert boost_expert > boost_junior
+
+
+def test_competence_boost_off_by_default():
+    hit = _hit("r1", "skills", "Python", ["python"], 0.5)
+    hit.metadata = {"seniority": "Lead"}
+    assert chunk_score(hit, ["python"], {"skills": 1.0}, alpha=0.8, beta=0.2) == pytest.approx(0.6)

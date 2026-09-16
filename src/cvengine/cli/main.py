@@ -163,6 +163,7 @@ def search(
     ),
     top_k_per_query: int = typer.Option(None, "--top-k-per-query", help="Chunks retrieved per query"),
     rerank_top_n: int = typer.Option(None, "--rerank-top-n", help="Chunks considered for reranking"),
+    competence_weight: float = typer.Option(None, "--competence-weight", help="Seniority boost weight (0=off)"),
     collection: str = typer.Option(None, "--collection", "-c", help="Collection name"),
 ) -> None:
     """Run the agentic search and render results as a table."""
@@ -172,6 +173,7 @@ def search(
         weight_list = [float(w) for w in weights.split(",")]
 
     rerank = engine.settings.scoring.rerank if with_rerank is None else with_rerank
+    comp_weight = engine.settings.scoring.competence_weight if competence_weight is None else competence_weight
     graph = SearchGraph(
         repo=engine.repo,
         enricher=engine.enricher,
@@ -180,6 +182,7 @@ def search(
         section_multipliers=engine.settings.scoring.section_multipliers,
         alpha=engine.settings.scoring.alpha,
         beta=engine.settings.scoring.beta,
+        competence_weight=comp_weight,
         top_k_per_query=engine.settings.scoring.top_k_per_query,
         rerank_top_n=engine.settings.scoring.rerank_top_n,
     )
@@ -205,6 +208,7 @@ def search(
                 "rerank": rerank,
                 "top_k_per_query": top_k_per_query,
                 "rerank_top_n": rerank_top_n,
+                "competence_weight": comp_weight,
             }
         )
         elapsed = (time.perf_counter() - start) * 1000
@@ -281,12 +285,14 @@ def eval_rank(
     collection: str = typer.Option(None, "--collection", "-c", help="Collection name"),
     top_k: int = typer.Option(10, "--top-k", help="Results per query"),
     with_rerank: bool = typer.Option(False, "--with-rerank", help="Enable the reranker"),
+    competence_weight: float = typer.Option(None, "--competence-weight", help="Seniority boost weight (0=off)"),
     report: Path = typer.Option(None, "--report", help="Write a JSON report to this path"),
 ) -> None:
     """Verify that the ranking surfaces the most competent resources (NDCG@k / MRR)."""
     import json
 
     settings = Settings()
+    comp_weight = settings.scoring.competence_weight if competence_weight is None else competence_weight
     manifest_path = manifest or Path(settings.data_dir) / "synth_manifest.json"
     if not manifest_path.exists():
         console.print(f"[red]Manifest not found: {manifest_path}. Run `cvengine synth` first.[/red]")
@@ -303,6 +309,7 @@ def eval_rank(
         section_multipliers=settings.scoring.section_multipliers,
         alpha=settings.scoring.alpha,
         beta=settings.scoring.beta,
+        competence_weight=comp_weight,
         top_k_per_query=settings.scoring.top_k_per_query,
         rerank_top_n=settings.scoring.rerank_top_n,
     )
@@ -350,6 +357,7 @@ def eval_rank(
         "precision_at_k": round(precision_total / queries, 4) if queries else 0.0,
         "top_k": top_k,
         "rerank": with_rerank,
+        "competence_weight": comp_weight,
         "details": details,
     }
     console.print(f"Queries: {summary['queries']}")

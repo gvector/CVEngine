@@ -94,6 +94,7 @@ class CVEngine:
                 section_multipliers=self.settings.scoring.section_multipliers,
                 alpha=self.settings.scoring.alpha,
                 beta=self.settings.scoring.beta,
+                competence_weight=self.settings.scoring.competence_weight,
                 top_k_per_query=self.settings.scoring.top_k_per_query,
                 rerank_top_n=self.settings.scoring.rerank_top_n,
             )

@@ -27,6 +27,7 @@ class SearchRequest(BaseModel):
     top_k_per_query: int | None = Field(default=None, ge=1, le=500)
     rerank_top_n: int | None = Field(default=None, ge=1, le=2000)
     section_multipliers: dict[str, float] | None = None
+    competence_weight: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class IngestRequest(BaseModel):
@@ -68,6 +69,7 @@ class CVEngineRouter:
                     "top_k_per_query": request.top_k_per_query,
                     "rerank_top_n": request.rerank_top_n,
                     "section_multipliers": request.section_multipliers,
+                    "competence_weight": request.competence_weight,
                 }
             )
             log_event(

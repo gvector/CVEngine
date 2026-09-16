@@ -11,6 +11,38 @@ from cvengine.db.schemas import ChunkHit, RankedResource, person_from_metadata
 
 _ALNUM = re.compile(r"[^a-z0-9]+")
 
+#: Normalized competence rank per seniority label (1..4 -> 0.25..1.0).
+SENIORITY_RANK: dict[str, float] = {
+    "junior": 0.25,
+    "mid": 0.5,
+    "senior": 0.75,
+    "lead": 1.0,
+    "principal": 1.0,
+    "expert": 1.0,
+    "manager": 0.75,
+    "director": 1.0,
+}
+
+
+def competence_from_metadata(metadata: dict[str, Any]) -> float:
+    """Derive a normalized competence value in [0, 1] from chunk metadata.
+
+    Uses the ``seniority`` label when present, otherwise falls back to
+    ``years_experience`` (capped at 20 years).
+
+    :param metadata: chunk metadata (Person fields)
+    :return: a competence value in [0, 1]
+    """
+    seniority = metadata.get("seniority")
+    if isinstance(seniority, str) and seniority.strip():
+        normalized = seniority.strip().lower()
+        if normalized in SENIORITY_RANK:
+            return SENIORITY_RANK[normalized]
+    years = metadata.get("years_experience")
+    if isinstance(years, (int, float)) and years > 0:
+        return max(0.0, min(1.0, float(years) / 20.0))
+    return 0.0
+
 
 def _normalize(term: str) -> str:
     text = unicodedata.normalize("NFKD", term.lower())
@@ -41,23 +73,30 @@ def chunk_score(
     section_multipliers: dict[str, float],
     alpha: float,
     beta: float,
+    competence_weight: float = 0.0,
 ) -> float:
     """Compute the blended score of a single chunk.
 
-    ``score = section_weight * (alpha * base + beta * keyword_overlap)`` where
-    ``base`` is the rerank score when available, else the cosine similarity.
+    ``score = section_weight * (alpha * base + beta * keyword_overlap) +
+    competence_weight * competence`` where ``base`` is the rerank score when
+    available, else the cosine similarity, and ``competence`` is the normalized
+    seniority/experience of the resource.
 
     :param hit: the retrieved chunk
     :param query_terms: the original search skills
     :param section_multipliers: per-section weights
     :param alpha: weight of the semantic base score
     :param beta: weight of the keyword metadata boost
+    :param competence_weight: weight of the competence (seniority) boost
     :return: the blended score in [0, 1]
     """
     base = hit.rerank_score if hit.rerank_score is not None else hit.similarity
     boost = keyword_overlap(query_terms, hit.keywords)
     multiplier = section_multipliers.get(hit.section, DEFAULT_SECTION_MULTIPLIERS["other"])
-    return max(0.0, min(1.0, multiplier * (alpha * base + beta * boost)))
+    score = multiplier * (alpha * base + beta * boost)
+    if competence_weight:
+        score += competence_weight * competence_from_metadata(hit.metadata)
+    return max(0.0, min(1.0, score))
 
 
 def score_hits(
@@ -67,6 +106,7 @@ def score_hits(
     section_multipliers: dict[str, float] | None = None,
     alpha: float = 0.8,
     beta: float = 0.2,
+    competence_weight: float = 0.0,
     top_k: int = 20,
 ) -> list[RankedResource]:
     """Rank resources from per-query grouped hits.
@@ -80,6 +120,7 @@ def score_hits(
     :param section_multipliers: optional per-section multipliers
     :param alpha: semantic weight
     :param beta: keyword boost weight
+    :param competence_weight: weight of the competence (seniority) boost
     :param top_k: number of resources to return
     :return: ranked resources, descending by score
     """
@@ -95,7 +136,7 @@ def score_hits(
                 hit.resource_id,
                 {"bests": {}, "best_chunk": "", "best_score": -1.0, "person": {}},
             )
-            value = chunk_score(hit, skills, multipliers, alpha, beta)
+            value = chunk_score(hit, skills, multipliers, alpha, beta, competence_weight)
             previous = entry["bests"].get(skill, 0.0)
             if value > previous:
                 entry["bests"][skill] = value

@@ -44,6 +44,7 @@ class ScoringSettings(BaseSettings):
 
     alpha: float = 0.8
     beta: float = 0.2
+    competence_weight: float = 0.0
     top_k_per_query: int = 30
     default_top_k: int = 20
     rerank_top_n: int = 100

@@ -32,6 +32,7 @@ class SearchState(TypedDict, total=False):
     top_k_per_query: int | None
     rerank_top_n: int | None
     section_multipliers: dict[str, float] | None
+    competence_weight: float | None
     query_terms: list[str]
     filters_effective: dict[str, Any] | None
     grouped_hits: list[list[ChunkHit]]
@@ -51,6 +52,7 @@ class SearchGraph:
         section_multipliers: dict[str, float] | None = None,
         alpha: float = 0.8,
         beta: float = 0.2,
+        competence_weight: float = 0.0,
         top_k_per_query: int = 30,
         rerank_top_n: int = 100,
     ) -> None:
@@ -61,6 +63,7 @@ class SearchGraph:
         self._multipliers = section_multipliers or DEFAULT_SECTION_MULTIPLIERS
         self._alpha = alpha
         self._beta = beta
+        self._competence_weight = competence_weight
         self._top_k_per_query = top_k_per_query
         self._rerank_top_n = rerank_top_n
         self._graph = self._build_graph()
@@ -165,6 +168,7 @@ class SearchGraph:
     def _score(self, state: SearchState) -> dict[str, Any]:
         top_k = state.get("top_k") or self._top_k_per_query
         multipliers = state.get("section_multipliers") or self._multipliers
+        competence_weight = state.get("competence_weight", self._competence_weight)
         results = score_hits(
             grouped_hits=state["grouped_hits"],
             skills=state["skills"],
@@ -172,6 +176,7 @@ class SearchGraph:
             section_multipliers=multipliers,
             alpha=self._alpha,
             beta=self._beta,
+            competence_weight=competence_weight,
             top_k=top_k,
         )
         return {"results": results}
