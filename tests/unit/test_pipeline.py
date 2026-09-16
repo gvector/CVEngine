@@ -91,3 +91,32 @@ def test_ingest_batch_with_workers(tmp_path):
     assert summary.total == 4
     assert summary.indexed == 4
     assert summary.failed == 0
+
+
+def test_ingest_structured_with_keywords():
+    from cvengine.ingestion.sectioner import HeadingSectioner
+
+    pipeline = _pipeline()
+    sectioning = HeadingSectioner().structure(CV_TEXT)
+    result = pipeline.ingest_structured(
+        sectioning,
+        resource_id="RES-STRUCT",
+        extra_metadata={"business_line": "TECH"},
+    )
+    assert result.status == "indexed"
+    stored = pipeline._repo.stored[0]  # type: ignore[attr-defined]
+    assert stored.metadata.business_line == "TECH"
+    skills_section = next(s for s in stored.sections if s.section.value == "skills")
+    assert skills_section.keywords  # keywords are stored (not empty)
+
+
+def test_ingest_structured_dedupes():
+    from cvengine.ingestion.sectioner import HeadingSectioner
+
+    pipeline = _pipeline()
+    sectioning = HeadingSectioner().structure(CV_TEXT)
+    first = pipeline.ingest_structured(sectioning, resource_id="RES-STRUCT")
+    second = pipeline.ingest_structured(sectioning, resource_id="RES-STRUCT")
+    assert first.status == "indexed"
+    assert second.status == "skipped"
+    assert len(pipeline._repo.stored) == 1  # type: ignore[attr-defined]

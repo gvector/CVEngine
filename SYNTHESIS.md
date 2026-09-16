@@ -236,3 +236,49 @@ uv run cvengine synth --count 400 --reset          # dataset completo + manifest
 uv run cvengine eval-rank --report cvengine_data/eval_rank.json
 uv run cvengine search "Machine Learning" --business-line TECH --collection cvs__nomic-embed-text-v1.5__v1__synth
 ```
+
+---
+
+## 12. Generazione LLM dei CV (implementata) ✅
+
+Su richiesta (i CV a template non erano abbastanza realistici) il testo dei CV viene ora
+generato da **Ollama** (`qwen2.5:3b`) con un prompt strutturato che include:
+- informazioni della persona (nome, ruolo, ramo/settore, seniority, anni, education);
+- l'istruzione relativa al **livello** (verbi appropriati: professional → architected/
+  directed; low → assisted/supported);
+- le **keyword/skill** da usare verbatim nella sezione SKILLS;
+- il settore (branch) per contesto realistico;
+- **keyword per ogni sezione** (summary, experience, projects...) così non mancano mai.
+
+Implementazione:
+- `synthetic/llm_generator.py`: `LLMCVGenerator` (prompt + JSON schema + retry + fallback
+  al template se l'LLM fallisce).
+- `ingestion/pipeline.py`: `ingest_structured()` per ingerire sezioni pre-strutturate
+  (con keyword) senza ri-sezionare.
+- `sectioner.py`: loop LLM condiviso (`llm_sectioning`) riusato da CVSectioner e generator.
+- CLI: `synth --llm --model ... --workers ...` e **`build-dataset`** (build notturna autonoma).
+
+### 12.1 `cvengine build-dataset` (build notturna autonoma)
+1. **Preflight**: verifica Chroma (heartbeat), Ollama + modello presente, embedding caricabile.
+   Se qualcosa manca → esce con codice 1 **senza toccare nulla**.
+2. **Reset** della collection `__synth` (e opzionale `__test`).
+3. **Generazione bilanciata** LLM (distribuzione uniforme sulle 72 celle: 6 rami × 3 ruoli × 4 livelli).
+4. **Manifest** ground-truth scritto su `cvengine_data/synth_manifest.json`.
+5. **Eval-rank** automatico (NDCG@10/MRR/precision) per verificare la qualità finale.
+6. **Log su file** per la revisione notturna.
+
+```bash
+# verifica senza modificare nulla
+uv run cvengine build-dataset --dry-run
+# run notturna completa
+nohup uv run cvengine build-dataset --count 144 --workers 6 \
+  --log-file cvengine_data/dataset_build.log &
+```
+
+Nota: la generazione LLM è lenta (~40-50s/CV). Il comando è **resumable**: in caso di
+interruzione, rilanciare con `--no-reset` per continuare dai già-generati.
+
+### 12.2 Stato attuale del dataset
+La collection `__synth` contiene al momento CV LLM **solo dei rami STRATEGY e FINANCE**
+(ereditati da un run interrotto). La build notturna con `build-dataset` la resetta e
+ricostruisce il dataset **bilanciato** su tutti e 6 i rami.

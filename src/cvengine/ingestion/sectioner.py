@@ -82,6 +82,66 @@ class SectioningOutput(BaseModel):
     sections: list[SectionEntry] = Field(min_length=1)
 
 
+def parse_sectioning(content: str) -> SectioningOutput:
+    """Parse and validate a raw LLM response into a SectioningOutput."""
+    data = json.loads(content)
+    if not isinstance(data, dict) or "sections" not in data:
+        raise ValueError("Response is missing the 'sections' key")
+    return SectioningOutput.model_validate(data)
+
+
+def llm_sectioning(
+    llm: LLMProvider,
+    messages: list[dict[str, str]],
+    fallback: Any,
+) -> SectioningOutput:
+    """Run an LLM sectioning request with validation and retries.
+
+    :param llm: the LLM provider
+    :param messages: the (system + user) messages driving the generation
+    :param fallback: callable producing a fallback SectioningOutput
+    :return: the validated output, or the fallback when all attempts fail
+    """
+    error_feedback: list[str] = []
+    for attempt in range(1, MAX_SECTIONING_RETRIES + 1):
+        prompt_messages = list(messages)
+        if error_feedback:
+            prompt_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Your previous answer was rejected for the following reason: "
+                        f"{error_feedback[-1]}. Return a corrected valid JSON response."
+                    ),
+                }
+            )
+        try:
+            response = llm.chat(prompt_messages, json_schema=SECTION_SCHEMA)
+            output = parse_sectioning(response.content)
+            log_event(
+                logger,
+                "llm sectioning completed",
+                sections=len(output.sections),
+                attempt=attempt,
+                model=llm.model,
+            )
+            return output
+        except (ValidationError, json.JSONDecodeError, ValueError) as exc:
+            error_feedback.append(str(exc))
+            log_event(
+                logger,
+                "llm sectioning retry",
+                attempt=attempt,
+                error=str(exc),
+            )
+    log_event(
+        logger,
+        "llm sectioning failed, using fallback",
+        attempts=MAX_SECTIONING_RETRIES,
+    )
+    return fallback()
+
+
 class CVSectioner:
     """Structure a CV into sections and extract keywords via the LLM."""
 
@@ -99,50 +159,11 @@ class CVSectioner:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"CV:\n{text}"},
         ]
-        error_feedback: list[str] = []
-        for attempt in range(1, MAX_SECTIONING_RETRIES + 1):
-            prompt_messages = list(messages)
-            if error_feedback:
-                prompt_messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your previous answer was rejected for the following reason: "
-                            f"{error_feedback[-1]}. Return a corrected valid JSON response."
-                        ),
-                    }
-                )
-            try:
-                response = self._llm.chat(prompt_messages, json_schema=SECTION_SCHEMA)
-                output = self._parse(response.content)
-                log_event(
-                    logger,
-                    "cv sectioned",
-                    sections=len(output.sections),
-                    attempt=attempt,
-                    model=self._llm.model,
-                )
-                return output
-            except (ValidationError, json.JSONDecodeError, ValueError) as exc:
-                error_feedback.append(str(exc))
-                log_event(
-                    logger,
-                    "sectioning retry",
-                    attempt=attempt,
-                    error=str(exc),
-                )
-        log_event(
-            logger,
-            "sectioning failed, using fallback",
-            attempts=MAX_SECTIONING_RETRIES,
+        return llm_sectioning(
+            self._llm,
+            messages,
+            fallback=lambda: SectioningOutput(sections=[SectionEntry(section=Section.OTHER, text=text)]),
         )
-        return SectioningOutput(sections=[SectionEntry(section=Section.OTHER, text=text)])
-
-    def _parse(self, content: str) -> SectioningOutput:
-        data = json.loads(content)
-        if not isinstance(data, dict) or "sections" not in data:
-            raise ValueError("Response is missing the 'sections' key")
-        return SectioningOutput.model_validate(data)
 
 
 def to_cv_sections(output: SectioningOutput) -> list[CVSection]:

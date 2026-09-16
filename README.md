@@ -57,8 +57,17 @@ uv run cvengine search "Python" "Machine Learning" \
 # Inspect the sections/keywords/metadata of a single resource (no models)
 uv run cvengine inspect RES-0001
 
-# Generate consulting-firm synthetic CVs (400 by default) into the __synth collection
-uv run cvengine synth --count 400 --reset
+# Generate consulting-firm synthetic CVs (template, fast) into the __synth collection
+uv run cvengine synth --count 144 --reset
+
+# Generate with the LLM (Ollama) — more realistic, slower
+uv run cvengine synth --count 144 --reset --llm --model qwen2.5:3b --workers 6
+
+# Autonomous nightly build: preflight (Chroma/Ollama/embedding) -> reset -> balanced LLM CVs -> manifest -> eval
+uv run cvengine build-dataset --count 144 --workers 6 --log-file cvengine_data/dataset_build.log
+
+# Verify prerequisites without changing anything
+uv run cvengine build-dataset --dry-run
 
 # Verify the ranking surfaces the most competent resources (NDCG@k / MRR)
 uv run cvengine eval-rank --report cvengine_data/eval_rank.json

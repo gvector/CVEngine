@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from pathlib import Path
@@ -243,9 +244,18 @@ def synth(
     collection: str = typer.Option(None, "--collection", "-c", help="Target collection name"),
     manifest: Path = typer.Option(None, "--manifest", help="Where to write the ground-truth manifest"),
     reset: bool = typer.Option(False, "--reset", help="Drop the collection before ingesting"),
+    llm: bool = typer.Option(False, "--llm", help="Generate CV text with the LLM (Ollama)"),
+    model: str = typer.Option(None, "--model", help="LLM model used for --llm generation"),
+    workers: int = typer.Option(None, "--workers", help="Concurrent LLM generations (Ollama)"),
+    dist_count: int = typer.Option(
+        None,
+        "--dist-count",
+        help="Profiles to generate before slicing to --count (keeps distribution stable for resume)",
+    ),
 ) -> None:
     """Generate consulting-firm synthetic CVs and ingest them into the __synth collection."""
     import json
+    from concurrent.futures import ThreadPoolExecutor
 
     settings = Settings()
     target = collection or settings.chroma.synth_collection
@@ -258,16 +268,42 @@ def synth(
             collection_name=target,
             provider=engine.embedding,
         )
-    engine.ingestion = IngestionPipeline(repo=engine.repo, sectioner=HeadingSectioner())
 
-    profiles = generate_profiles(count, seed=seed)
+    profiles = generate_profiles(dist_count or count, seed=seed)[:count]
+    engine.ingestion = IngestionPipeline(repo=engine.repo, sectioner=HeadingSectioner())
     with console.status(f"Ingesting {count} synthetic CVs..."):
-        for profile in profiles:
-            engine.ingestion.ingest_text(
-                text=build_cv_text(profile),
-                resource_id=profile.resource_id,
-                extra_metadata=profile_metadata(profile),
-            )
+        if llm:
+            from cvengine.llm.factory import build_llm
+            from cvengine.synthetic.llm_generator import LLMCVGenerator
+
+            settings.llm.model = model or settings.llm.model
+            llm_provider = build_llm(settings.llm)
+            workers = max(1, workers or settings.ingestion_workers or 1)
+            existing = set(engine.repo.get_resource_ids())
+
+            def generate_one(profile):
+                if profile.resource_id in existing:
+                    return None
+                generator = LLMCVGenerator(llm_provider)
+                return engine.ingestion.ingest_structured(
+                    generator.structure(profile),
+                    resource_id=profile.resource_id,
+                    extra_metadata=profile_metadata(profile),
+                )
+
+            if workers == 1:
+                for profile in profiles:
+                    generate_one(profile)
+            else:
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    list(executor.map(generate_one, profiles))
+        else:
+            for profile in profiles:
+                engine.ingestion.ingest_text(
+                    text=build_cv_text(profile),
+                    resource_id=profile.resource_id,
+                    extra_metadata=profile_metadata(profile),
+                )
 
     manifest_path = manifest or Path(settings.data_dir) / "synth_manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,7 +311,7 @@ def synth(
         json.dumps(build_manifest(profiles, seed=seed), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    console.print(f"Ingested {count} synthetic CVs into '{engine.repo.collection_name}'")
+    console.print(f"Ingested {count} synthetic CVs into '{engine.repo.collection_name}' (llm={llm})")
     console.print(f"Ground-truth manifest written to {manifest_path}")
 
 
@@ -389,6 +425,198 @@ def serve(
     app = create_app(engine)
     console.print(f"API on http://localhost:{port}/docs — viewer: {engine.settings.viewer_enabled}")
     uvicorn.run(app, host=host, port=port)
+
+
+@app.command()
+def build_dataset(
+    count: int = typer.Option(144, "--count", help="Number of CVs (balanced across the 72 cells)"),
+    seed: int = typer.Option(42, "--seed", help="Random seed"),
+    model: str = typer.Option("qwen2.5:3b", "--model", help="Ollama model used for generation"),
+    workers: int = typer.Option(6, "--workers", help="Concurrent LLM generations"),
+    reset: bool = typer.Option(True, "--reset/--no-reset", help="Drop the synth collection before building"),
+    also_reset_test: bool = typer.Option(False, "--also-reset-test", help="Also drop the __test collection"),
+    collection: str = typer.Option(None, "--collection", "-c", help="Target collection name"),
+    log_file: Path = typer.Option(None, "--log-file", help="Append a run log to this file"),
+    run_eval: bool = typer.Option(True, "--eval/--no-eval", help="Run eval-rank after building"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only run preflight checks, touch nothing"),
+) -> None:
+    """Autonomous nightly build: preflight -> reset -> LLM-generate balanced CVs -> manifest -> eval.
+
+    Fails safely (exit 1) before touching any collection when Chroma, Ollama or
+    the embedding model is unavailable. Resumable: re-run with --no-reset to
+    continue after an interruption.
+    """
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+
+    settings = Settings()
+    if log_file:
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logging.getLogger("cvengine").addHandler(handler)
+    target = collection or settings.chroma.synth_collection
+
+    console.print(f"[bold]Preflight[/bold] (target collection: {target})")
+    _preflight(settings, model)
+    if dry_run:
+        console.print("[bold]Dry run: preflight OK, nothing was changed.[/bold]")
+        return
+
+    engine = _engine(target)
+    if reset:
+        console.print("[yellow]Resetting collection...[/yellow]")
+        engine.repo.reset()
+        engine.repo = ChromaRepository(
+            host=settings.chroma.host,
+            port=settings.chroma.port,
+            collection_name=target,
+            provider=engine.embedding,
+        )
+    if also_reset_test:
+        test_repo = ChromaRepository(
+            host=settings.chroma.host,
+            port=settings.chroma.port,
+            collection_name=settings.chroma.test_collection,
+            provider=engine.embedding,
+        )
+        with contextlib.suppress(Exception):
+            test_repo.reset()
+
+    engine.ingestion = IngestionPipeline(repo=engine.repo, sectioner=HeadingSectioner())
+    profiles = generate_profiles(count, seed=seed)
+
+    from cvengine.llm.factory import build_llm
+    from cvengine.synthetic.llm_generator import LLMCVGenerator
+
+    settings.llm.model = model
+    llm_provider = build_llm(settings.llm)
+    workers = max(1, workers)
+    existing = set(engine.repo.get_resource_ids())
+
+    def generate_one(profile):
+        if profile.resource_id in existing:
+            return "skipped"
+        result = engine.ingestion.ingest_structured(
+            LLMCVGenerator(llm_provider).structure(profile),
+            resource_id=profile.resource_id,
+            extra_metadata=profile_metadata(profile),
+        )
+        return result.status
+
+    started = time.time()
+    with console.status(f"Generating {count} LLM CVs ({workers} workers)..."):
+        if workers == 1:
+            statuses = [generate_one(profile) for profile in profiles]
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                statuses = list(executor.map(generate_one, profiles))
+
+    from collections import Counter
+
+    counts = Counter(statuses)
+    elapsed_min = (time.time() - started) / 60
+    console.print(f"Done in {elapsed_min:.1f} min: {dict(counts)}")
+
+    manifest_path = Path(settings.data_dir) / "synth_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(build_manifest(profiles, seed=seed), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    console.print(f"Manifest: {manifest_path}")
+    console.print(
+        f"Collection '{engine.repo.collection_name}' now has {engine.repo.count()} chunks / {len(engine.repo.get_resource_ids())} resources"
+    )
+
+    if run_eval:
+        console.print("[bold]Running eval-rank...[/bold]")
+        state = _run_eval_rank(engine, manifest_path, top_k=10, competence_weight=0.15)
+        console.print(f"NDCG@10={state['ndcg_at_k']} MRR={state['mrr']} precision@10={state['precision_at_k']}")
+
+
+def _preflight(settings: Settings, model: str) -> None:
+    """Verify Chroma, Ollama (with the chosen model) and the embedding model."""
+    import chromadb
+    import ollama
+
+    try:
+        chromadb.HttpClient(host=settings.chroma.host, port=settings.chroma.port).heartbeat()
+        console.print("  [green]Chroma: OK[/green]")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"  [red]Chroma: FAIL ({exc})[/red]")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        names = [m.get("model", "") or m.get("name", "") for m in ollama.Client(host=settings.llm.base_url).list().models]
+        if not any(name.startswith(model) for name in names):
+            console.print(f"  [red]Ollama: model {model!r} not found. Available: {names or 'none'}[/red]")
+            console.print(f"  [dim]Run: ollama pull {model}[/dim]")
+            raise typer.Exit(code=1)
+        console.print(f"  [green]Ollama: OK ({model})[/green]")
+    except typer.Exit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"  [red]Ollama: FAIL ({exc})[/red]")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        from cvengine.embeddings.provider import SentenceTransformerProvider
+
+        SentenceTransformerProvider(settings.embedding.model, settings.embedding.dimension)
+        console.print("  [green]Embedding: OK[/green]")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"  [red]Embedding: FAIL ({exc})[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print("[bold]Preflight passed — proceeding.[/bold]")
+
+
+def _run_eval_rank(engine, manifest_path: Path, top_k: int, competence_weight: float) -> dict:
+    """Run the NDCG/MRR evaluation against the given manifest and engine."""
+    import json
+
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    resources = data["resources"]
+    level_rank = data["levels"]
+
+    graph = SearchGraph(
+        repo=engine.repo,
+        enricher=None,
+        reranker=None,
+        section_multipliers=engine.settings.scoring.section_multipliers,
+        alpha=engine.settings.scoring.alpha,
+        beta=engine.settings.scoring.beta,
+        competence_weight=competence_weight,
+        top_k_per_query=engine.settings.scoring.top_k_per_query,
+        rerank_top_n=engine.settings.scoring.rerank_top_n,
+    )
+
+    by_skill: dict[str, list[dict]] = {}
+    for resource in resources:
+        for skill in resource["primary_skills"]:
+            by_skill.setdefault(skill, []).append(resource)
+
+    ndcg_total = mrr_total = precision_total = 0.0
+    queries = 0
+    for skill, candidates in by_skill.items():
+        relevant = {r["resource_id"] for r in candidates}
+        state = graph.invoke({"skills": [skill], "top_k": top_k, "rerank": False})
+        ranked_ids = [result.resource_id for result in state["results"]]
+        gains = [
+            level_rank[next((r["level"] for r in candidates if r["resource_id"] == rid), "low")] for rid in ranked_ids
+        ]
+        ndcg_total += ndcg_at_k(gains, k=top_k)
+        hit_rank = next((i + 1 for i, rid in enumerate(ranked_ids) if rid in relevant), None)
+        if hit_rank:
+            mrr_total += 1.0 / hit_rank
+            precision_total += len([rid for rid in ranked_ids if rid in relevant]) / top_k
+        queries += 1
+
+    return {
+        "queries": queries,
+        "ndcg_at_k": round(ndcg_total / queries, 4) if queries else 0.0,
+        "mrr": round(mrr_total / queries, 4) if queries else 0.0,
+        "precision_at_k": round(precision_total / queries, 4) if queries else 0.0,
+    }
 
 
 @app.command("migrate-pkl")

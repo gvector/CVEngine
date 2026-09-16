@@ -168,6 +168,9 @@ rimandati al futuro, configurazione **solo env**, dedup **solo content-hash**.
   da 0.83 a 0.98 e il top-1 `professional` da 13/97 a 85/97. Da **calibrare sui dati reali**.
 - **Visualizzatore Chroma** ✅ *implementato*: pagina read-only `/viewer` (browse + query
   client-side) nell'API FastAPI, attivabile con `CVENGINE_VIEWER_ENABLED` o `cvengine serve --viewer`.
+- **CV sintetici generati da LLM** ✅ *implementato*: `LLMCVGenerator` (prompt con persona,
+  livello, keyword, settore; keyword per ogni sezione) + `build-dataset` per build notturna
+  autonoma (preflight → reset → generazione bilanciata → manifest → eval). Dettagli in SYNTHESIS.md.
 - **Retrieval ibrido**: fusione vettoriale + lessicale (BM25/TF-IDF) con RRF
   (Reciprocal Rank Fusion) e pesi configurabili.
 - **Loop di refine nell'agente**: retrieve → critica → raffina query → re-retrieve
