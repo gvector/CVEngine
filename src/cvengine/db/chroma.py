@@ -247,5 +247,22 @@ class ChromaRepository:
         return self._col.count()
 
     def reset(self) -> None:
-        """Delete the underlying collection entirely."""
-        self._client.delete_collection(self.collection_name)
+        """Delete the underlying collection entirely (no-op if it does not exist)."""
+        try:
+            self._client.delete_collection(self.collection_name)
+        except chromadb.errors.NotFoundError:
+            log_event(
+                logger,
+                "collection reset skipped (not found)",
+                collection=self.collection_name,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface unexpected failures
+            log_event(
+                logger,
+                "collection reset failed",
+                collection=self.collection_name,
+                error=str(exc),
+            )
+            raise
+        finally:
+            self._collection = None

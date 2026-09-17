@@ -55,6 +55,19 @@ def test_get_resource_body_orders_chunks(chroma_repo):
     assert "summary" in body and "Python" in body
 
 
+def test_reset_on_missing_collection_is_noop(chroma_repo):
+    # chroma_repo points at a fresh collection; delete it, then reset again.
+    chroma_repo.reset()
+    chroma_repo.reset()  # second reset must not raise (collection gone)
+
+
+def test_reset_deletes_all_chunks(chroma_repo):
+    chroma_repo.upsert_cv(_cv("RES-1", "Python", ["python"]))
+    assert chroma_repo.count() > 0
+    chroma_repo.reset()
+    assert chroma_repo.count() == 0
+
+
 def test_get_resource_metadata(chroma_repo):
     chroma_repo.upsert_cv(_cv("RES-1", "Python", ["python"]))
     metadata = chroma_repo.get_resource_metadata("RES-1")

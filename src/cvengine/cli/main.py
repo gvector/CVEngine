@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
 from cvengine.config import Settings
@@ -493,6 +494,10 @@ def build_dataset(
     llm_provider = build_llm(settings.llm)
     workers = max(1, workers)
     existing = set(engine.repo.get_resource_ids())
+    console.print(
+        f"[green]Ready:[/green] {len(profiles)} profiles · {workers} worker(s) · "
+        f"model {model} · {len(existing)} already indexed (will be skipped)"
+    )
 
     def generate_one(profile):
         if profile.resource_id in existing:
@@ -504,19 +509,45 @@ def build_dataset(
         )
         return result.status
 
-    started = time.time()
-    with console.status(f"Generating {count} LLM CVs ({workers} workers)..."):
-        if workers == 1:
-            statuses = [generate_one(profile) for profile in profiles]
-        else:
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                statuses = list(executor.map(generate_one, profiles))
-
     from collections import Counter
+
+    started = time.time()
+    progress = Progress(
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("({task.completed}/{task.total})"),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    )
+    task_id = progress.add_task(f"Generating {count} LLM CVs with {model}", total=len(profiles))
+
+    statuses: list[str] = []
+    try:
+        with progress:
+            if workers == 1:
+                for profile in profiles:
+                    statuses.append(generate_one(profile))
+                    progress.advance(task_id)
+            else:
+                from concurrent.futures import as_completed
+
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = [executor.submit(generate_one, profile) for profile in profiles]
+                    for future in as_completed(futures):
+                        statuses.append(future.result())
+                        progress.advance(task_id)
+    except KeyboardInterrupt:
+        console.print(
+            "\n[yellow]Interrupted by user.[/yellow] Progress so far is saved. "
+            "Resume later with: cvengine build-dataset --count ... --no-reset"
+        )
+        raise typer.Exit(code=130) from None
 
     counts = Counter(statuses)
     elapsed_min = (time.time() - started) / 60
-    console.print(f"Done in {elapsed_min:.1f} min: {dict(counts)}")
+    console.print(f"[bold]Generation done[/bold] in {elapsed_min:.1f} min: {dict(counts)}")
 
     manifest_path = Path(settings.data_dir) / "synth_manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
