@@ -562,10 +562,11 @@ def _preflight(settings: Settings, model: str) -> None:
         raise typer.Exit(code=1) from exc
 
     try:
-        from cvengine.embeddings.provider import SentenceTransformerProvider
+        from cvengine.embeddings.provider import build_embedding
 
-        SentenceTransformerProvider(settings.embedding.model, settings.embedding.dimension)
-        console.print("  [green]Embedding: OK[/green]")
+        provider = build_embedding(settings.embedding)
+        provider.embed_query("preflight check")
+        console.print(f"  [green]Embedding: OK ({settings.embedding.backend}/{provider.model_name})[/green]")
     except Exception as exc:  # noqa: BLE001
         console.print(f"  [red]Embedding: FAIL ({exc})[/red]")
         raise typer.Exit(code=1) from exc

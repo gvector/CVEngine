@@ -17,12 +17,19 @@ class LLMSettings(BaseSettings):
 
 
 class EmbeddingSettings(BaseSettings):
-    """Configuration for the sentence-transformer embedding model."""
+    """Configuration for the embedding backend and model."""
 
     model_config = SettingsConfigDict(env_prefix="CVENGINE_EMBEDDING_", extra="ignore")
 
-    model: str = "nomic-ai/nomic-embed-text-v1.5"
+    #: "ollama" (local Ollama /api/embed, e.g. embeddinggemma:300m) or
+    #: "sentence-transformers" (in-process, e.g. nomic-ai/nomic-embed-text-v1.5).
+    backend: str = "ollama"
+    model: str = "embeddinggemma:300m"
     dimension: int = 768
+    base_url: str = "http://localhost:11434"
+    # Task prefixes applied by the sentence-transformers backend (empty for models that need none).
+    query_prefix: str = ""
+    document_prefix: str = ""
 
 
 class ChromaSettings(BaseSettings):
@@ -32,9 +39,9 @@ class ChromaSettings(BaseSettings):
 
     host: str = "localhost"
     port: int = 8000
-    collection: str = "cvs__nomic-embed-text-v1.5__v1"
-    test_collection: str = "cvs__nomic-embed-text-v1.5__v1__test"
-    synth_collection: str = "cvs__nomic-embed-text-v1.5__v1__synth"
+    collection: str = "cvs__embeddinggemma-300m__v1"
+    test_collection: str = "cvs__embeddinggemma-300m__v1__test"
+    synth_collection: str = "cvs__embeddinggemma-300m__v1__synth"
 
 
 class ScoringSettings(BaseSettings):

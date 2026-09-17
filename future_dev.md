@@ -171,6 +171,9 @@ rimandati al futuro, configurazione **solo env**, dedup **solo content-hash**.
 - **CV sintetici generati da LLM** ✅ *implementato*: `LLMCVGenerator` (prompt con persona,
   livello, keyword, settore; keyword per ogni sezione) + `build-dataset` per build notturna
   autonoma (preflight → reset → generazione bilanciata → manifest → eval). Dettagli in SYNTHESIS.md.
+- **Embedding via Ollama** ✅ *implementato*: backend configurabile (`ollama` default con
+  `embeddinggemma:300m` / `sentence-transformers` con nomic). Collection versionate
+  `cvs__embeddinggemma-300m__v1`.
 - **Retrieval ibrido**: fusione vettoriale + lessicale (BM25/TF-IDF) con RRF
   (Reciprocal Rank Fusion) e pesi configurabili.
 - **Loop di refine nell'agente**: retrieve → critica → raffina query → re-retrieve

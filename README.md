@@ -10,8 +10,9 @@ LangGraph.
 - **LLM-based CV structuring**: each CV is split into canonical sections
   (summary, skills, experience, projects, certifications, education, languages, other)
   with per-section keyword extraction used as search metadata.
-- **Vector search**: chunks are embedded with `nomic-ai/nomic-embed-text-v1.5`
-  (768 dims, in-process) and stored in a versioned Chroma collection.
+- **Vector search**: chunks are embedded with `embeddinggemma:300m` via local Ollama
+  (768 dims; sentence-transformers backend available as an alternative), and stored in
+  a versioned Chroma collection.
 - **Agentic ranking**: LangGraph pipeline `enrich -> retrieve -> rerank -> score -> synthesize`
   with query expansion, cross-encoder reranking (`bge-reranker-base`), section-weighted
   hybrid scoring (semantic + keyword metadata) and optional LLM synthesis.
@@ -103,7 +104,7 @@ CVEngine/
 │  ├─ observability.py   # structured JSON logging + timing
 │  ├─ services.py        # application container (CVEngine)
 │  ├─ db/                # Chroma repository + data models
-│  ├─ embeddings/        # nomic provider with task prefixes
+│  ├─ embeddings/        # embedding backends (Ollama / sentence-transformers)
 │  ├─ llm/               # OpenAI / Ollama providers (configurable)
 │  ├─ ingestion/         # extraction, LLM sectioning, pipeline, pkl migrator
 │  ├─ search/            # LangGraph agent, reranker, hybrid scoring

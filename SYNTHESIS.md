@@ -278,7 +278,21 @@ nohup uv run cvengine build-dataset --count 144 --workers 6 \
 Nota: la generazione LLM è lenta (~40-50s/CV). Il comando è **resumable**: in caso di
 interruzione, rilanciare con `--no-reset` per continuare dai già-generati.
 
-### 12.2 Stato attuale del dataset
+### 12.3 Embedding: embeddinggemma via Ollama (implementato) ✅
+Il backend embedding è ora configurabile (`CVENGINE_EMBEDDING_BACKEND`):
+- **`ollama` (default)**: usa `embeddinggemma:300m` dal server Ollama locale
+  (`/api/embed`). Il modello è già scaricato in Ollama e su HuggingFace è gated
+  (richiederebbe token HF) → è la via più comoda. 768 dim.
+- **`sentence-transformers`**: in-process (es. `nomic-ai/nomic-embed-text-v1.5`)
+  per ambienti senza Ollama o modelli non gated.
+
+Collection versionate aggiornate: `cvs__embeddinggemma-300m__v1` (+ `__test`, `__synth`).
+
+Nota: l'embedding via Ollama richiede il server Ollama attivo (necessario comunque per la
+generazione LLM dei CV). Se l'embedding è il collo di bottiglia, si può passare a
+`sentence-transformers` con nomic via env.
+
+### 12.4 Stato attuale del dataset
 La collection `__synth` contiene al momento CV LLM **solo dei rami STRATEGY e FINANCE**
 (ereditati da un run interrotto). La build notturna con `build-dataset` la resetta e
 ricostruisce il dataset **bilanciato** su tutti e 6 i rami.

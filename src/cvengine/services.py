@@ -8,7 +8,7 @@ from pathlib import Path
 
 from cvengine.config import Settings
 from cvengine.db.chroma import ChromaRepository
-from cvengine.embeddings.provider import SentenceTransformerProvider
+from cvengine.embeddings.provider import build_embedding
 from cvengine.ingestion.pipeline import IngestionPipeline
 from cvengine.ingestion.sectioner import CVSectioner
 from cvengine.llm.base import LLMProvider
@@ -48,10 +48,7 @@ class CVEngine:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
         self.llm: LLMProvider = build_llm(self.settings.llm)
-        self.embedding = SentenceTransformerProvider(
-            model_name=self.settings.embedding.model,
-            dimension=self.settings.embedding.dimension,
-        )
+        self.embedding = build_embedding(self.settings.embedding)
         self.repo = ChromaRepository(
             host=self.settings.chroma.host,
             port=self.settings.chroma.port,

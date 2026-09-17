@@ -5,7 +5,8 @@ def test_defaults():
     settings = Settings()
     assert settings.llm.provider == "ollama"
     assert settings.llm.model == "llama3.1:8b"
-    assert settings.embedding.model == "nomic-ai/nomic-embed-text-v1.5"
+    assert settings.embedding.backend == "ollama"
+    assert settings.embedding.model == "embeddinggemma:300m"
     assert settings.embedding.dimension == 768
     assert settings.chroma.port == 8000
     assert settings.scoring.alpha == 0.8
