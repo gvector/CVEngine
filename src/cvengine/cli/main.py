@@ -451,6 +451,7 @@ def build_dataset(
 
     settings = Settings()
     if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
         handler = logging.FileHandler(log_file)
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         logging.getLogger("cvengine").addHandler(handler)
