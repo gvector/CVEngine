@@ -547,7 +547,9 @@ def _preflight(settings: Settings, model: str) -> None:
         raise typer.Exit(code=1) from exc
 
     try:
-        names = [m.get("model", "") or m.get("name", "") for m in ollama.Client(host=settings.llm.base_url).list().models]
+        names = [
+            m.get("model", "") or m.get("name", "") for m in ollama.Client(host=settings.llm.base_url).list().models
+        ]
         if not any(name.startswith(model) for name in names):
             console.print(f"  [red]Ollama: model {model!r} not found. Available: {names or 'none'}[/red]")
             console.print(f"  [dim]Run: ollama pull {model}[/dim]")
